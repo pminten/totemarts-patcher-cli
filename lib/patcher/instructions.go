@@ -1,8 +1,6 @@
 package patcher
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/url"
@@ -82,9 +80,7 @@ func (i *Instruction) IsDelete() bool {
 
 // DecodeInstructions decodes instructions.json and runs some basic sanity checks.
 func DecodeInstructions(jsonData []byte, instructionsHash string) ([]Instruction, error) {
-	hash := sha256.New()
-	hash.Write(jsonData)
-	checksum := hex.EncodeToString(hash.Sum(nil))
+	checksum := HashBytes(jsonData)
 	if !strings.EqualFold(checksum, instructionsHash) {
 		return nil, fmt.Errorf("instructions.json hash mismatch, expected %s got %s", instructionsHash, checksum)
 	}
