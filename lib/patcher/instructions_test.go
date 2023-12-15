@@ -3,6 +3,7 @@ package patcher
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -27,11 +28,13 @@ func TestDecodeInstructionsRealistic(t *testing.T) {
 	}]
 	`)
 	expected := []Instruction{{
-		Path:           "Binaries/InstallData/dotNetFx40_Full_setup.exe",
-		OldHash:        "FA1AFFF978325F8818CE3A559D67A58297D9154674DE7FD8EB03656D93104425",
-		NewHash:        someStr("FA1AFFF978325F8818CE3A559D67A58297D9154674DE7FD8EB03656D93104425"),
-		CompressedHash: "1854E191B7DB2537CF1F27DBC512D0FED8C661329EC6BC8A0290BFB125CC12C0",
-		DeltaHash:      nil,
+		Path:            filepath.Join("Binaries", "InstallData", "dotNetFx40_Full_setup.exe"),
+		OldHash:         "FA1AFFF978325F8818CE3A559D67A58297D9154674DE7FD8EB03656D93104425",
+		NewHash:         someStr("FA1AFFF978325F8818CE3A559D67A58297D9154674DE7FD8EB03656D93104425"),
+		CompressedHash:  "1854E191B7DB2537CF1F27DBC512D0FED8C661329EC6BC8A0290BFB125CC12C0",
+		DeltaHash:       nil,
+		FullReplaceSize: 794539,
+		DeltaSize:       0,
 	}}
 	// Bypass the hash check.
 	hash := sha256.New()
@@ -164,9 +167,4 @@ func TestDecodeInstructionsInconsistentNoHasDeltaPath(t *testing.T) {
 	checksum := hex.EncodeToString(hash.Sum(nil))
 	_, err := DecodeInstructions(jsonData, checksum)
 	require.ErrorContains(t, err, "HasDelta unset but contains a DeltaHash")
-}
-
-// Make a literal string fit a pointer to string.
-func someStr(s string) *string {
-	return &s
 }

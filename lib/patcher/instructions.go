@@ -3,7 +3,6 @@ package patcher
 import (
 	"encoding/json"
 	"fmt"
-	"net/url"
 	"path/filepath"
 	"strings"
 )
@@ -22,6 +21,10 @@ type rawInstruction struct {
 	DeltaHash *string `json:"DeltaHash"`
 	// Whether a delta patch exists.
 	HasDelta bool `json:"HasDelta"`
+	// Size in bytes of the full patch file.
+	FullReplaceSize int64 `json:"FullReplaceSize"`
+	// Size in bytes of the delta patch file. Zero if there is no delta patch file.
+	DeltaSize int64 `json:"DeltaSize"`
 }
 
 // An Instruction contains the relevant part of an instruction from instructions.json
@@ -38,44 +41,10 @@ type Instruction struct {
 	CompressedHash string
 	// If a delta patch exists the hash of the delta patch file.
 	DeltaHash *string
-}
-
-// FullPatchPath constructs the path to the full patch file given a base URL.
-// If there's no patch file (i.e. if the file should be deleted) the second
-// return value is false.
-func (i *Instruction) FullPatchPath(base *url.URL) (*url.URL, bool) {
-	if i.NewHash == nil {
-		return nil, false
-	}
-	return base.JoinPath("full", *i.NewHash), true
-}
-
-// DeltaPatchPath constructs the path to the delta hash file.
-// If there's no patch file (i.e. if the file should be deleted) or
-// there's no delta patch the second return value is false.
-func (i *Instruction) DeltaPatchPath(base *url.URL) (*url.URL, bool) {
-	if filename, ok := i.DeltaPatchFilename(); ok {
-		return base.JoinPath("delta", filename), true
-	}
-	return nil, false
-}
-
-// DeltaPatchFilename returns a filename for the delta hash file.
-// If there's no patch file (i.e. if the file should be deleted) or
-// there's no delta patch the second return value is false.
-func (i *Instruction) DeltaPatchFilename() (string, bool) {
-	if i.NewHash == nil {
-		return "", false
-	}
-	if i.DeltaHash == nil {
-		return "", false
-	}
-	return fmt.Sprintf("%s_to_%s", i.OldHash, *i.NewHash), true
-}
-
-// IsDelete is true if the instruction is a delete instruction.
-func (i *Instruction) IsDelete() bool {
-	return i.NewHash == nil
+	// Size in bytes of the full patch file.
+	FullReplaceSize int64
+	// Size in bytes of the delta patch file. Zero if there is no delta patch file.
+	DeltaSize int64
 }
 
 // DecodeInstructions decodes instructions.json and runs some basic sanity checks.
@@ -90,7 +59,8 @@ func DecodeInstructions(jsonData []byte, instructionsHash string) ([]Instruction
 	}
 	instructions := make([]Instruction, 0, len(rawInstructions))
 	for _, ri := range rawInstructions {
-		path := strings.ReplaceAll(ri.Path, "\\", "/")
+		// This little dance normalizes paths to work on Linux as well.
+		path := filepath.Clean(strings.ReplaceAll(ri.Path, "\\", string(filepath.Separator)))
 		if filepath.IsAbs(path) {
 			return nil, fmt.Errorf("instructions.json contains absolute path: %s", path)
 		}
@@ -108,11 +78,13 @@ func DecodeInstructions(jsonData []byte, instructionsHash string) ([]Instruction
 		}
 
 		instructions = append(instructions, Instruction{
-			Path:           path,
-			OldHash:        ri.OldHash,
-			NewHash:        ri.NewHash,
-			CompressedHash: ri.CompressedHash,
-			DeltaHash:      ri.DeltaHash,
+			Path:            path,
+			OldHash:         ri.OldHash,
+			NewHash:         ri.NewHash,
+			CompressedHash:  ri.CompressedHash,
+			DeltaHash:       ri.DeltaHash,
+			FullReplaceSize: ri.FullReplaceSize,
+			DeltaSize:       ri.DeltaSize,
 		})
 	}
 	return instructions, nil
