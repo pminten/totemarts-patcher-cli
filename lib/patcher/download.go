@@ -21,14 +21,8 @@ import (
 type Downloader struct {
 	mu sync.Mutex
 
-	// Maximum number of attempts.
-	maxAttempts int
-
-	// Minimum time between retries.
-	retryBaseDelay time.Duration
-
-	// How much to increment the delay between retries (factor, so 2 = double every retry).
-	retryWaitIncrementFactor float64
+	// Downloader configuration.
+	config DownloadConfig
 
 	// Current and past downloads.
 	downloads map[string]*downloadRecord
@@ -44,6 +38,21 @@ type Downloader struct {
 
 	// How many files have been downloaded.
 	downloadCount int64
+}
+
+// A DownloadConfig is the configuration for a Downloader.
+type DownloadConfig struct {
+	// Maximum number of attempts.
+	MaxAttempts int
+
+	// Minimum time between retries.
+	RetryBaseDelay time.Duration
+
+	// How much to increment the delay between retries (factor, so 2 = double every retry).
+	RetryWaitIncrementFactor float64
+
+	// How many seconds to average the download speed over.
+	DownloadSpeedWindow int
 }
 
 // DownloadStats are current information about the download activity.
@@ -86,18 +95,13 @@ type downloadObserver struct {
 // NewDownloader creates a new downloader. Pass retry configuration and over how many seconds
 // the download speed should be averaged.
 func NewDownloader(
-	maxAttempts int,
-	retryBaseDelay time.Duration,
-	retryWaitIncrementFactor float64,
-	downloadSpeedWindow int,
+	config DownloadConfig,
 ) *Downloader {
 	return &Downloader{
 		mu:                        sync.Mutex{},
-		maxAttempts:               maxAttempts,
-		retryBaseDelay:            retryBaseDelay,
-		retryWaitIncrementFactor:  retryWaitIncrementFactor,
+		config:                    DownloadConfig{},
 		downloads:                 make(map[string]*downloadRecord),
-		downloadSpeed:             NewAverager(downloadSpeedWindow),
+		downloadSpeed:             NewAverager(config.DownloadSpeedWindow),
 		bytesDownloadedThisSecond: 0,
 		bytesDownloadedTotal:      0,
 		downloadCount:             0,
@@ -132,10 +136,8 @@ func (d *Downloader) DownloadFile(
 	downloadIdx := d.downloadCount
 	d.downloadCount++
 	// Copy variables under mutex.
-	maxAttempts := d.maxAttempts
-	retryBaseDelay := d.retryBaseDelay
-	retryMultiplier := d.retryWaitIncrementFactor
-	d.mu.Unlock() // Not with a defer but just getting and incrementing vars can't panic.
+	config := d.config // It's a struct of value types, so this is a copy.
+	d.mu.Unlock()      // Not with a defer but just getting and incrementing vars can't panic.
 
 	// First check if the output file already exists and has the right checksum,
 	// if so it's a leftover from the previous run that we can reuse.
@@ -149,7 +151,7 @@ func (d *Downloader) DownloadFile(
 	if err == nil {
 		// Checking for expected size avoids reading the whole file if there's no way it can match.
 		if fileInfo, err := existingFile.Stat(); err == nil && fileInfo.Size() == expectedSize {
-			if checksum, err := HashReader(existingFile); err == nil && checksum == expectedChecksum {
+			if checksum, err := HashReader(ctx, existingFile); err == nil && checksum == expectedChecksum {
 				log.Debug().
 					Stringer("download_url", downloadUrl).
 					Str("filename", filename).
@@ -159,24 +161,24 @@ func (d *Downloader) DownloadFile(
 		}
 	}
 
-	waitTime := retryBaseDelay
+	waitTime := config.RetryBaseDelay
 	attempt := 1
 	for {
 		if err := d.doDownloadFile(ctx, downloadUrl, filename, expectedChecksum, downloadIdx); err != nil {
-			if attempt > maxAttempts {
+			if attempt > config.MaxAttempts {
 				return err
 			}
 			log.Info().
 				Stringer("download_url", downloadUrl).
 				Str("filename", filename).
 				Int("attempt", attempt). // Make it easier for one-based readers.
-				Int("max_retries", maxAttempts).
+				Int("max_retries", config.MaxAttempts).
 				Stringer("wait_time", waitTime).
 				Err(err).
 				Msg("Download failed, will retry after a short wait.")
 
 			// This mainly works because the durations are going to be fairly small so overflows are unlikely.
-			waitTime = time.Duration(float64(waitTime) * retryMultiplier)
+			waitTime = time.Duration(float64(waitTime) * config.RetryWaitIncrementFactor)
 		} else {
 			return nil
 		}
