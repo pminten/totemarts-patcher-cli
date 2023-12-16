@@ -126,6 +126,7 @@ func (d *Downloader) DownloadFile(
 	downloadUrl *url.URL,
 	filename string,
 	expectedChecksum string,
+	expectedSize int64,
 ) error {
 	d.mu.Lock()
 	downloadIdx := d.downloadCount
@@ -136,6 +137,28 @@ func (d *Downloader) DownloadFile(
 	retryMultiplier := d.retryWaitIncrementFactor
 	d.mu.Unlock() // Not with a defer but just getting and incrementing vars can't panic.
 
+	// First check if the output file already exists and has the right checksum,
+	// if so it's a leftover from the previous run that we can reuse.
+	// This simple approach does have the limitation that a partially downloaded file
+	// is ignored, resulting in a full download again, but it's pretty simple and should
+	// avoid most downloads after an aborted run.
+	existingFile, err := os.Open(filename)
+
+	// This is an optimistic check, any error just means we can't shortcut.
+	// No real clean way to write this, nested if might be the least ugly.
+	if err == nil {
+		// Checking for expected size avoids reading the whole file if there's no way it can match.
+		if fileInfo, err := existingFile.Stat(); err == nil && fileInfo.Size() == expectedSize {
+			if checksum, err := HashReader(existingFile); err == nil && checksum == expectedChecksum {
+				log.Debug().
+					Stringer("download_url", downloadUrl).
+					Str("filename", filename).
+					Msg("Patch file is already present, skipping download.")
+				return nil
+			}
+		}
+	}
+
 	waitTime := retryBaseDelay
 	attempt := 1
 	for {
@@ -143,13 +166,14 @@ func (d *Downloader) DownloadFile(
 			if attempt > maxAttempts {
 				return err
 			}
-			// Make this JSON reportable?
 			log.Info().
+				Stringer("download_url", downloadUrl).
+				Str("filename", filename).
 				Int("attempt", attempt). // Make it easier for one-based readers.
 				Int("max_retries", maxAttempts).
 				Stringer("wait_time", waitTime).
 				Err(err).
-				Msg("download failed, will retry after a short wait")
+				Msg("Download failed, will retry after a short wait.")
 
 			// This mainly works because the durations are going to be fairly small so overflows are unlikely.
 			waitTime = time.Duration(float64(waitTime) * retryMultiplier)
@@ -188,6 +212,10 @@ func (d *Downloader) doDownloadFile(
 		return fmt.Errorf("failed to request download of %q: %w", downloadUrl, err)
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to download %q to %q (status %d): %w", downloadUrl, filename, resp.StatusCode, err)
+	}
 
 	reader := io.TeeReader(resp.Body, observer)
 	_, err = io.Copy(file, reader)
