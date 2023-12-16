@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -12,7 +13,7 @@ import (
 
 func TestParpoolOk(t *testing.T) {
 	execute := func(ctx context.Context, a int64) (string, error) { return strconv.FormatInt(a, 10), nil }
-	actual, err := DoInParallel[int64, string](context.Background(), execute, []int64{1, 2, 3, 4, 5}, 2)
+	actual, err := DoInParallelWithResult[int64, string](context.Background(), execute, []int64{1, 2, 3, 4, 5}, 2)
 	expected := []string{"1", "2", "3", "4", "5"}
 	require.NoError(t, err)
 	require.EqualValues(t, expected, actual)
@@ -25,7 +26,7 @@ func TestParpoolSingleError(t *testing.T) {
 		}
 		return strconv.FormatInt(a, 10), nil
 	}
-	_, err := DoInParallel[int64, string](context.Background(), execute, []int64{1, 2, 3, 4, 5}, 2)
+	_, err := DoInParallelWithResult[int64, string](context.Background(), execute, []int64{1, 2, 3, 4, 5}, 2)
 	require.ErrorContains(t, err, "no three")
 }
 
@@ -45,6 +46,20 @@ func TestParpoolCancelled(t *testing.T) {
 		time.Sleep(500 * time.Millisecond)
 		cancel()
 	}()
-	_, err := DoInParallel[int64, string](ctx, execute, []int64{1, 2, 3, 4, 5}, 2)
+	_, err := DoInParallelWithResult[int64, string](ctx, execute, []int64{1, 2, 3, 4, 5}, 2)
 	require.ErrorIs(t, err, context.Canceled)
+}
+
+func TestParpoolNoResult(t *testing.T) {
+	m := sync.Mutex{}
+	res := ""
+	execute := func(ctx context.Context, a int64) error {
+		m.Lock()
+		defer m.Unlock()
+		res += strconv.FormatInt(a, 10)
+		return nil
+	}
+	err := DoInParallel[int64](context.Background(), execute, []int64{1, 2, 3, 4, 5}, 2)
+	require.NoError(t, err)
+	require.Equal(t, "12345", res)
 }
