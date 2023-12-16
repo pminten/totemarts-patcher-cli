@@ -191,17 +191,18 @@ func TestDetermineActionsFileNotExists(t *testing.T) {
 	actions := DetermineActions(instructions, manifest, infos, checksums)
 	require.EqualValues(t, []DownloadInstr{
 		{
-			RemotePath:       "full/def",
-			LocalPath:        "patch/def",
-			ExpectedChecksum: "ghi",
-			Size:             12,
+			RemotePath: "full/def",
+			LocalPath:  "patch/def",
+			Checksum:   "ghi",
+			Size:       12,
 		},
 	}, actions.ToDownload)
 	require.EqualValues(t, []UpdateInstr{
 		{
-			FilePath:  filename1,
-			PatchPath: "patch/def",
-			IsDelta:   false,
+			FilePath:     filename1,
+			PatchPath:    "patch/def",
+			TempFilename: "patch/apply/00000_def",
+			IsDelta:      false,
 		},
 	}, actions.ToUpdate)
 	require.Empty(t, actions.ToDelete)
@@ -288,28 +289,30 @@ func TestDetermineActionsDownloadFullPatchForMismatch(t *testing.T) {
 	actions := DetermineActions(instructions, manifest, infos, checksums)
 	require.EqualValues(t, []DownloadInstr{
 		{
-			RemotePath:       "full/def",
-			LocalPath:        "patch/def",
-			ExpectedChecksum: "ghi",
-			Size:             12,
+			RemotePath: "full/def",
+			LocalPath:  "patch/def",
+			Checksum:   "ghi",
+			Size:       12,
 		},
 		{
-			RemotePath:       "full/wvu",
-			LocalPath:        "patch/wvu",
-			ExpectedChecksum: "tsr",
-			Size:             25,
+			RemotePath: "full/wvu",
+			LocalPath:  "patch/wvu",
+			Checksum:   "tsr",
+			Size:       25,
 		},
 	}, actions.ToDownload)
 	require.EqualValues(t, []UpdateInstr{
 		{
-			FilePath:  filename1,
-			PatchPath: "patch/def",
-			IsDelta:   false,
+			FilePath:     filename1,
+			PatchPath:    "patch/def",
+			TempFilename: "patch/apply/00000_def",
+			IsDelta:      false,
 		},
 		{
-			FilePath:  filename2,
-			PatchPath: "patch/wvu",
-			IsDelta:   false,
+			FilePath:     filename2,
+			PatchPath:    "patch/wvu",
+			TempFilename: "patch/apply/00001_wvu",
+			IsDelta:      false,
 		},
 	}, actions.ToUpdate)
 	require.Empty(t, actions.ToDelete)
@@ -337,17 +340,18 @@ func TestDetermineActionsDownloadDeltaPatch(t *testing.T) {
 	actions := DetermineActions(instructions, manifest, infos, checksums)
 	require.EqualValues(t, []DownloadInstr{
 		{
-			RemotePath:       "delta/abc_to_def",
-			LocalPath:        "patch/abc_to_def",
-			ExpectedChecksum: "jkl",
-			Size:             4,
+			RemotePath: "delta/abc_to_def",
+			LocalPath:  "patch/abc_to_def",
+			Checksum:   "jkl",
+			Size:       4,
 		},
 	}, actions.ToDownload)
 	require.EqualValues(t, []UpdateInstr{
 		{
-			FilePath:  filename1,
-			PatchPath: "patch/abc_to_def",
-			IsDelta:   true,
+			FilePath:     filename1,
+			PatchPath:    "patch/abc_to_def",
+			TempFilename: "patch/apply/00000_def",
+			IsDelta:      true,
 		},
 	}, actions.ToUpdate)
 	require.Empty(t, actions.ToDelete)

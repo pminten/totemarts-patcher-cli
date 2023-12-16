@@ -27,7 +27,7 @@ type DownloadInstr struct {
 	LocalPath string
 
 	// Checksum the patch file should have.
-	ExpectedChecksum string
+	Checksum string
 
 	// Size of the patch file in bytes.
 	Size int64
@@ -40,6 +40,9 @@ type UpdateInstr struct {
 
 	// Filename for the file to patch.
 	FilePath string
+
+	// Temporary filename for the new file.
+	TempFilename string
 
 	// Whether the patch should be applied as a delta patch.
 	IsDelta bool
@@ -90,7 +93,7 @@ func DetermineActions(
 	toUpdateMap := make(map[string]UpdateInstr)     // Keyed by Path
 	toDelete := make([]string, 0)
 
-	for _, instr := range instructions {
+	for instrIdx, instr := range instructions {
 		if instr.NewHash == nil {
 			toDelete = append(toDelete, instr.Path)
 			continue
@@ -100,17 +103,23 @@ func DetermineActions(
 		fullPatchRemotePath := path.Join("full", *instr.NewHash)
 		fullPatchLocalPath := path.Join("patch", *instr.NewHash)
 
+		// The temp files get moved into place, which causes problems if a single applied
+		// file is used for multiple final files. So use a naming scheme that avoid such
+		// complications. The index refers to the index in the instructions.json file.
+		tempPath := path.Join("patch", "apply", fmt.Sprintf("%05d_%s", instrIdx, *instr.NewHash))
+
 		if !found {
 			toDownloadMap[instr.CompressedHash] = DownloadInstr{
-				RemotePath:       fullPatchRemotePath,
-				LocalPath:        fullPatchLocalPath,
-				ExpectedChecksum: instr.CompressedHash,
-				Size:             instr.FullReplaceSize,
+				RemotePath: fullPatchRemotePath,
+				LocalPath:  fullPatchLocalPath,
+				Checksum:   instr.CompressedHash,
+				Size:       instr.FullReplaceSize,
 			}
 			toUpdateMap[instr.Path] = UpdateInstr{
-				FilePath:  instr.Path,
-				PatchPath: fullPatchLocalPath,
-				IsDelta:   false,
+				FilePath:     instr.Path,
+				PatchPath:    fullPatchLocalPath,
+				TempFilename: tempPath,
+				IsDelta:      false,
 			}
 		} else if manifest.Check(instr.Path, fileInfo.ModTime, *instr.NewHash) ||
 			fileChecksums[instr.Path] == *instr.NewHash {
@@ -121,28 +130,30 @@ func DetermineActions(
 			deltaPatchRemotePath := path.Join("delta", deltaFilename)
 			deltaPatchLocalPath := path.Join("patch", deltaFilename)
 			toDownloadMap[*instr.DeltaHash] = DownloadInstr{
-				RemotePath:       deltaPatchRemotePath,
-				LocalPath:        deltaPatchLocalPath,
-				ExpectedChecksum: *instr.DeltaHash,
-				Size:             instr.DeltaSize,
+				RemotePath: deltaPatchRemotePath,
+				LocalPath:  deltaPatchLocalPath,
+				Checksum:   *instr.DeltaHash,
+				Size:       instr.DeltaSize,
 			}
 			toUpdateMap[instr.Path] = UpdateInstr{
-				FilePath:  instr.Path,
-				PatchPath: deltaPatchLocalPath,
-				IsDelta:   true,
+				FilePath:     instr.Path,
+				PatchPath:    deltaPatchLocalPath,
+				TempFilename: tempPath,
+				IsDelta:      true,
 			}
 		} else {
 			// File doesn't match checksum.
 			toDownloadMap[instr.CompressedHash] = DownloadInstr{
-				RemotePath:       fullPatchRemotePath,
-				LocalPath:        fullPatchLocalPath,
-				ExpectedChecksum: instr.CompressedHash,
-				Size:             instr.FullReplaceSize,
+				RemotePath: fullPatchRemotePath,
+				LocalPath:  fullPatchLocalPath,
+				Checksum:   instr.CompressedHash,
+				Size:       instr.FullReplaceSize,
 			}
 			toUpdateMap[instr.Path] = UpdateInstr{
-				FilePath:  instr.Path,
-				PatchPath: fullPatchLocalPath,
-				IsDelta:   false,
+				FilePath:     instr.Path,
+				PatchPath:    fullPatchLocalPath,
+				TempFilename: tempPath,
+				IsDelta:      false,
 			}
 		}
 	}
