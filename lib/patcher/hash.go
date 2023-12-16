@@ -1,6 +1,7 @@
 package patcher
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"io"
@@ -14,12 +15,12 @@ func HashBytes(data []byte) string {
 }
 
 // HashReader reads data via a reader and computes a SHA256 hash of it.
-func HashReader(s io.Reader) (string, error) {
+func HashReader(ctx context.Context, s io.Reader) (string, error) {
 	hash := sha256.New()
 	// Reading up to 1 meg to try to avoid unnecessary syscalls. There's no guarantee that this
 	// much data is returned of course, it just allows for it.
 	buf := make([]byte, 1<<20)
-	for {
+	for ctx.Err() == nil {
 		read, err := s.Read(buf)
 		// Per docs for (io.Reader).Read the number of bytes read should be processed
 		// before the error.
@@ -33,4 +34,5 @@ func HashReader(s io.Reader) (string, error) {
 			return "", err
 		}
 	}
+	return "", ctx.Err()
 }

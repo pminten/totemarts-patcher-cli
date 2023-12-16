@@ -2,6 +2,7 @@ package patcher
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"io"
 	"testing"
@@ -14,7 +15,7 @@ func TestHashReaderAndHashBytes(t *testing.T) {
 	data := make([]byte, 10000)
 	_, err := io.ReadAtLeast(rand.Reader, data, len(data))
 	require.NoError(t, err)
-	actual, err := HashReader(bytes.NewReader(data))
+	actual, err := HashReader(context.Background(), bytes.NewReader(data))
 	require.NoError(t, err)
 	expected := HashBytes(data)
 	require.EqualValues(t, expected, actual)
