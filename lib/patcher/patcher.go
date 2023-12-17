@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/rs/zerolog/log"
 )
@@ -35,6 +36,13 @@ type PatcherConfig struct {
 	// Where to find the xdelta binary. If just a basename without directory
 	// will look in PATH and also in the current directory.
 	XDeltaBinPath string
+
+	// A function that gets called every few seconds with the current progress
+	// until the context passed to RunPatcher is canceled.
+	ProgressFunc func(Progress)
+
+	// How often to call ProgressFunc.
+	ProgressInterval time.Duration
 }
 
 // Helper tuple for measuring a file.
@@ -51,7 +59,7 @@ func runVerifyPhase(
 	manifest *Manifest,
 	installDir string,
 	numWorkers int,
-	progress *Progress,
+	progress *ProgressTracker,
 ) (*DeterminedActions, error) {
 	log.Info().
 		Str("install_dir", installDir).
@@ -103,7 +111,7 @@ func runDownloadPhase(
 	installDir string,
 	baseUrl *url.URL,
 	downloadConfig DownloadConfig,
-	progress *Progress,
+	progress *ProgressTracker,
 	numWorkers int,
 ) error {
 	// Stop the downloader automatically.
@@ -148,7 +156,7 @@ func runPatchPhase(
 	toDelete []string,
 	installDir string,
 	xdelta *XDelta,
-	progress *Progress,
+	progress *ProgressTracker,
 	numWorkers int,
 ) error {
 	log.Info().
@@ -214,8 +222,6 @@ func RunPatcher(ctx context.Context, instructions []Instruction, config PatcherC
 		return err
 	}
 
-	progress := NewProgress()
-
 	// These paths are also hardcoded in the determination logic.
 	patchDir := filepath.Join(config.InstallDir, "patch")
 	patchApplyDir := filepath.Join(config.InstallDir, "patch/apply")
@@ -223,6 +229,21 @@ func RunPatcher(ctx context.Context, instructions []Instruction, config PatcherC
 	if err = os.MkdirAll(patchApplyDir, 0755); err != nil {
 		return fmt.Errorf("couldn't create patch and patch apply directories %q: %w", patchApplyDir, err)
 	}
+
+	progress := NewProgress()
+	go func() {
+		timer := time.NewTimer(config.ProgressInterval)
+		for {
+			select {
+			case <-timer.C:
+				config.ProgressFunc(progress.Current())
+			case <-ctx.Done():
+				// Report progress one last time, usually that's the "all completed" progress.
+				config.ProgressFunc(progress.Current())
+				return
+			}
+		}
+	}()
 
 	actions, err := runVerifyPhase(
 		ctx,

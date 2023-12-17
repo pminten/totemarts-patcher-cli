@@ -15,10 +15,14 @@ const (
 	PhaseApply    Phase = 2
 )
 
-// Progress is used to track the progress of the patching process.
-type Progress struct {
-	mu sync.Mutex
+// ProgressTracker is used to track the progress of the patching process.
+type ProgressTracker struct {
+	mu      sync.Mutex
+	current Progress
+}
 
+// Progress is current progress information.
+type Progress struct {
 	// Running average of download speed in bytes per second.
 	DownloadSpeed int64
 
@@ -47,44 +51,53 @@ type ProgressPhase struct {
 	Needed int
 }
 
-func NewProgress() *Progress {
-	return &Progress{}
+// NewProgress creates a progress tracker.
+func NewProgress() *ProgressTracker {
+	return &ProgressTracker{}
 }
 
-func (p *Progress) UpdateDownloadStats(stats DownloadStats) {
+// Current returns a copy of the current progress.
+func (p *ProgressTracker) Current() Progress {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.DownloadSpeed = stats.Speed
-	p.DownloadTotalBytes = stats.TotalBytes
+	return p.current
+}
+
+// UpdateDownloadStats updates the download related statistics.
+func (p *ProgressTracker) UpdateDownloadStats(stats DownloadStats) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.current.DownloadSpeed = stats.Speed
+	p.current.DownloadTotalBytes = stats.TotalBytes
 }
 
 // SetPhaseNeeded sets the needed value for a phase.
-func (p *Progress) SetPhaseNeeded(phase Phase, needed int) {
+func (p *ProgressTracker) SetPhaseNeeded(phase Phase, needed int) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	switch phase {
 	case PhaseVerify:
-		p.Verify.Needed = needed
+		p.current.Verify.Needed = needed
 	case PhaseDownload:
-		p.Download.Needed = needed
+		p.current.Download.Needed = needed
 	case PhaseApply:
-		p.Apply.Needed = needed
+		p.current.Apply.Needed = needed
 	default:
 		panic(fmt.Sprintf("Unknown phase %d", phase))
 	}
 }
 
 // PhaseItemStarted increments the processing value in a phase.
-func (p *Progress) PhaseItemStarted(phase Phase) {
+func (p *ProgressTracker) PhaseItemStarted(phase Phase) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	switch phase {
 	case PhaseVerify:
-		p.Verify.Processing++
+		p.current.Verify.Processing++
 	case PhaseDownload:
-		p.Download.Processing++
+		p.current.Download.Processing++
 	case PhaseApply:
-		p.Apply.Processing++
+		p.current.Apply.Processing++
 	default:
 		panic(fmt.Sprintf("Unknown phase %d", phase))
 	}
@@ -92,17 +105,17 @@ func (p *Progress) PhaseItemStarted(phase Phase) {
 
 // PhaseItemDone increments the errors or completed value in a phase
 // and decreases the processing value.
-func (p *Progress) PhaseItemDone(phase Phase, err error) {
+func (p *ProgressTracker) PhaseItemDone(phase Phase, err error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	var ph *ProgressPhase
 	switch phase {
 	case PhaseVerify:
-		ph = &p.Verify
+		ph = &p.current.Verify
 	case PhaseDownload:
-		ph = &p.Download
+		ph = &p.current.Download
 	case PhaseApply:
-		ph = &p.Apply
+		ph = &p.current.Apply
 	default:
 		panic(fmt.Sprintf("Unknown phase %d", phase))
 	}
