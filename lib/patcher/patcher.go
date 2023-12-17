@@ -81,11 +81,12 @@ func runVerifyPhase(
 			progress.PhaseItemStarted(PhaseVerify)
 			defer progress.PhaseItemDone(PhaseVerify, retErr)
 			realFilename := filepath.Join(installDir, filename)
-			reader, err := os.Open(realFilename)
+			file, err := os.Open(realFilename)
 			if err != nil {
 				return measuredFile{}, fmt.Errorf("failed to open %q to compute checksum: %w", realFilename, err)
 			}
-			checksum, err := HashReader(ctx, reader)
+			defer file.Close()
+			checksum, err := HashReader(ctx, file)
 			if err != nil {
 				return measuredFile{}, fmt.Errorf("failed to open compute checksum of %q: %w", realFilename, err)
 			}
@@ -192,15 +193,21 @@ func runPatchPhase(
 	for _, ui := range toUpdate {
 		tempPath := filepath.Join(installDir, ui.TempFilename)
 		realPath := filepath.Join(installDir, ui.FilePath)
+		realDir := filepath.Dir(realPath)
+		if err := os.MkdirAll(realDir, 0755); err != nil {
+			return fmt.Errorf("failed to ensure directories for patched file %q exist: %w", realPath, err)
+		}
 		if err := os.Rename(tempPath, realPath); err != nil {
 			return fmt.Errorf("failed to move patched file %q to %q: %w", tempPath, realPath, err)
 		}
 	}
 
-	log.Info().
-		Str("install_dir", installDir).
-		Int("files_to_delete", len(toUpdate)).
-		Msg("Deleting obsolete files.")
+	if len(toDelete) > 0 {
+		log.Info().
+			Str("install_dir", installDir).
+			Int("files_to_delete", len(toDelete)).
+			Msg("Deleting obsolete files (if any).")
+	}
 	for _, path := range toDelete {
 		realPath := filepath.Join(installDir, path)
 		if err := os.Remove(realPath); err != nil {
@@ -232,10 +239,10 @@ func RunPatcher(ctx context.Context, instructions []Instruction, config PatcherC
 
 	progress := NewProgress()
 	go func() {
-		timer := time.NewTimer(config.ProgressInterval)
+		ticker := time.NewTicker(config.ProgressInterval)
 		for {
 			select {
-			case <-timer.C:
+			case <-ticker.C:
 				config.ProgressFunc(progress.Current())
 			case <-ctx.Done():
 				// Report progress one last time, usually that's the "all completed" progress.

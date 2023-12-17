@@ -107,13 +107,13 @@ func NewDownloader(
 		downloadCount:             0,
 	}
 	go func() {
-		timer := time.NewTimer(time.Second)
+		ticker := time.NewTicker(time.Second)
 		for {
 			select {
-			case <-timer.C:
+			case <-ticker.C:
 				tickFunc(d.tick())
 			case <-tickFuncCtx.Done():
-				timer.Stop()
+				ticker.Stop()
 				d.mu.Lock()
 				defer d.mu.Unlock()
 				// Fake an update to force speed to 0, otherwise it might get stuck at
@@ -157,6 +157,7 @@ func (d *Downloader) DownloadFile(
 	// This is an optimistic check, any error just means we can't shortcut.
 	// No real clean way to write this, nested if might be the least ugly.
 	if err == nil {
+		defer existingFile.Close()
 		// Checking for expected size avoids reading the whole file if there's no way it can match.
 		if fileInfo, err := existingFile.Stat(); err == nil && fileInfo.Size() == expectedSize {
 			if checksum, err := HashReader(ctx, existingFile); err == nil && checksum == expectedChecksum {
@@ -234,7 +235,7 @@ func (d *Downloader) doDownloadFile(
 	}
 
 	observer.dip.d.mu.Lock()
-	defer observer.dip.d.mu.Lock()
+	defer observer.dip.d.mu.Unlock()
 	observer.dip.done = true // At this point we know the download was successful.
 	actualChecksum := hex.EncodeToString(observer.hash.Sum(nil))
 	if !strings.EqualFold(expectedChecksum, actualChecksum) {

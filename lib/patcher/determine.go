@@ -126,7 +126,7 @@ func DetermineActions(
 			continue // Already up to date.
 		} else if instr.DeltaHash != nil && fileChecksums[instr.Path] == instr.OldHash {
 			// Can use (hopefully much smaller) delta file to upgrade.
-			deltaFilename := fmt.Sprintf("%s_to_%s", instr.OldHash, *instr.NewHash)
+			deltaFilename := fmt.Sprintf("%s_from_%s", *instr.NewHash, instr.OldHash)
 			deltaPatchRemotePath := path.Join("delta", deltaFilename)
 			deltaPatchLocalPath := path.Join("patch", deltaFilename)
 			toDownloadMap[*instr.DeltaHash] = DownloadInstr{

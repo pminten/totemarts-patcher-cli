@@ -340,8 +340,8 @@ func TestDetermineActionsDownloadDeltaPatch(t *testing.T) {
 	actions := DetermineActions(instructions, manifest, infos, checksums)
 	require.EqualValues(t, []DownloadInstr{
 		{
-			RemotePath: "delta/abc_to_def",
-			LocalPath:  "patch/abc_to_def",
+			RemotePath: "delta/def_from_abc",
+			LocalPath:  "patch/def_from_abc",
 			Checksum:   "jkl",
 			Size:       4,
 		},
@@ -349,7 +349,7 @@ func TestDetermineActionsDownloadDeltaPatch(t *testing.T) {
 	require.EqualValues(t, []UpdateInstr{
 		{
 			FilePath:     filename1,
-			PatchPath:    "patch/abc_to_def",
+			PatchPath:    "patch/def_from_abc",
 			TempFilename: "patch/apply/00000_def",
 			IsDelta:      true,
 		},
