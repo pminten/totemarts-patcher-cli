@@ -66,20 +66,6 @@ func Update(kongCtx *kong.Context) {
 		ProgressFunc:     progressFunc,
 	}
 
-	var instructionsFile *os.File
-	if CLI.Update.Instructions == "-" {
-		// Instructions from stdin.
-		instructionsFile = os.Stdin
-	} else {
-		instructionsFile, err = os.Open(CLI.Update.Instructions)
-		kongCtx.FatalIfErrorf(err, "Couldn't open instructions.json file.")
-		defer instructionsFile.Close()
-	}
-	instructionsData, err := io.ReadAll(instructionsFile)
-	kongCtx.FatalIfErrorf(err, "Couldn't read from instructions.json file %q.", CLI.Update.Instructions)
-	instructions, err := patcher.DecodeInstructions(instructionsData, CLI.Update.InstructionsHash)
-	kongCtx.FatalIfErrorf(err, "Couldn't decode instructions.json file %q.", CLI.Update.Instructions)
-
 	ctx := context.Background()
 	ctx, stopNotify := signal.NotifyContext(ctx, os.Interrupt)
 	defer stopNotify()
@@ -87,6 +73,18 @@ func Update(kongCtx *kong.Context) {
 	if CLI.Update.LogPretty {
 		log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
 	}
+
+	var instructionsData []byte
+	if CLI.Update.Instructions == "-" {
+		// Instructions from stdin.
+		instructionsData, err = io.ReadAll(os.Stdin)
+		kongCtx.FatalIfErrorf(err, "Couldn't read instructions.json from stdin.", CLI.Update.Instructions)
+	} else {
+		instructionsData, err = os.ReadFile(CLI.Update.Instructions)
+		kongCtx.FatalIfErrorf(err, "Couldn't read instructions.json file %q.", CLI.Update.Instructions)
+	}
+	instructions, err := patcher.DecodeInstructions(instructionsData, CLI.Update.InstructionsHash)
+	kongCtx.FatalIfErrorf(err, "Couldn't decode instructions.json file %q.", CLI.Update.Instructions)
 
 	err = patcher.RunPatcher(ctx, instructions, config)
 	if err != nil && !errors.Is(err, context.Canceled) {

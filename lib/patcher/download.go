@@ -99,7 +99,7 @@ func NewDownloader(
 ) *Downloader {
 	d := &Downloader{
 		mu:                        sync.Mutex{},
-		config:                    DownloadConfig{},
+		config:                    config,
 		downloads:                 make(map[string]*downloadRecord),
 		downloadSpeed:             NewAverager(config.DownloadSpeedWindow),
 		bytesDownloadedThisSecond: 0,
