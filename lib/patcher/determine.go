@@ -14,9 +14,10 @@ import (
 // b. Determine what to do with files (update, delete).
 // 3. Download patch files.
 // 4. Apply patch files and delete files (i.e. create/update/delete final files).
-
-// One big challenge is that some people have crappy ISPs. That may cause downloads to fail
-// halfway through.
+//
+// For historical reasons scanning and verifying is considered to be part of a single phase.
+// The user probably won't notice, the scanning part is pretty quick given that there are only
+// in the order of 1000 files.
 
 // A DownloadInstr indicates how to download a patch file.
 type DownloadInstr struct {
