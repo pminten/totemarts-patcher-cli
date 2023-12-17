@@ -259,6 +259,7 @@ func (d *Downloader) register(downloadUrl *url.URL, filename string, downloadIdx
 		d:             d,
 		downloadUrl:   downloadUrl,
 		bytesReceived: 0,
+		downloadIdx:   downloadIdx,
 	}
 	d.downloads[filename] = dip
 	observer := &downloadObserver{
