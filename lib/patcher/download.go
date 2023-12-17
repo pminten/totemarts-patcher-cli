@@ -94,7 +94,7 @@ type downloadObserver struct {
 // the context is canceled.
 func NewDownloader(
 	config DownloadConfig,
-	statsFunc func(DownloadStats),
+	tickFunc func(DownloadStats),
 	tickFuncCtx context.Context,
 ) *Downloader {
 	d := &Downloader{
@@ -111,14 +111,14 @@ func NewDownloader(
 		for {
 			select {
 			case <-timer.C:
-				statsFunc(d.tick())
+				tickFunc(d.tick())
 			case <-tickFuncCtx.Done():
 				timer.Stop()
 				d.mu.Lock()
 				defer d.mu.Unlock()
 				// Fake an update to force speed to 0, otherwise it might get stuck at
 				// a higher value and that looks silly.
-				statsFunc(DownloadStats{
+				tickFunc(DownloadStats{
 					Speed:      0,
 					TotalBytes: d.bytesDownloadedTotal,
 				})
@@ -224,7 +224,7 @@ func (d *Downloader) doDownloadFile(
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("failed to download %q to %q (status %d): %w", downloadUrl, filename, resp.StatusCode, err)
+		return fmt.Errorf("failed to download %q to %q (status %d)", downloadUrl, filename, resp.StatusCode)
 	}
 
 	reader := io.TeeReader(resp.Body, observer)
