@@ -20,6 +20,9 @@ func ScanFiles(rootDir string) (map[string]BasicFileInfo, error) {
 	infos := make(map[string]BasicFileInfo)
 	filesystem := os.DirFS(rootDir)
 	err := fs.WalkDir(filesystem, ".", func(path string, d fs.DirEntry, err error) error {
+		if d.IsDir() {
+			return nil
+		}
 		if err != nil {
 			return fmt.Errorf("error while scanning file %q: %w", path, err)
 		}
