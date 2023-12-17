@@ -187,6 +187,7 @@ func (d *Downloader) DownloadFile(
 				Msg("Download failed, will retry after a short wait.")
 
 			// This mainly works because the durations are going to be fairly small so overflows are unlikely.
+			attempt++
 			waitTime = time.Duration(float64(waitTime) * config.RetryWaitIncrementFactor)
 		} else {
 			return nil
