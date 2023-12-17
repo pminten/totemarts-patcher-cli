@@ -2,11 +2,15 @@ package patcher
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 )
 
 // An XDelta instance provides helpers for invoking the xdelta program.
@@ -36,33 +40,65 @@ func NewXDelta(binPath string) (*XDelta, error) {
 	}, nil
 }
 
-// ApplyDeltaPath applies a delta patch to upgrade the file at oldPath to newPath.
-func (x XDelta) ApplyDeltaPatch(ctx context.Context, oldPath string, patchPath string, newPath string) error {
-	// Decompress, source window <num>, force overwrite, source file to copy from (oldPath).
-	// Source window number is copied from Vue/Electron launcher.
-	cmd := exec.CommandContext(ctx, x.binPath, "-d", "-B", "536870912", "-f", "-s", oldPath, patchPath, newPath)
-	if err := cmd.Run(); err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			return fmt.Errorf("applying delta patch %q to %q to get %q failed: %w; xdelta said: %s",
-				oldPath, patchPath, newPath, err, string(exitErr.Stderr))
-		}
-		return fmt.Errorf("applying delta patch %q to %q to get %q failed: %w",
-			oldPath, patchPath, newPath, err)
+// ApplyPatch runs the xdelta binary, outputting to newPath, validating the checksum at the same time.
+// If oldPath is not nil it's a delta patch, otherwise it's a full patch.
+func (x XDelta) ApplyPatch(
+	ctx context.Context,
+	oldPath *string,
+	patchPath string,
+	newPath string,
+	expectedChecksum string,
+) error {
+	// Validating the checksum here makes the xdelta code messier but saves a lot of time because
+	// we don't have to read the file later.
+	var cmd *exec.Cmd
+	var what string
+	if oldPath == nil {
+		// Decompress, source window <num>, force overwrite.
+		// Source window number is copied from Vue/Electron launcher.
+		cmd = exec.CommandContext(ctx, x.binPath, "-d", "-B", "536870912", "-f", patchPath)
+		what = fmt.Sprintf("applying full patch %q to get %q", patchPath, newPath)
+	} else {
+		// Decompress, source window <num>, force overwrite, source file to copy from (oldPath).
+		cmd = exec.CommandContext(ctx, x.binPath, "-d", "-B", "536870912", "-f", "-s", *oldPath, patchPath)
+		what = "delta patch"
+		what = fmt.Sprintf("applying full patch %q to %q to get %q", patchPath, *oldPath, newPath)
 	}
-	return nil
-}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return fmt.Errorf("%s failed (create stdout pipe): %w", what, err)
+	}
 
-// ApplyFullPath applies a full / replacement patch to create the file at newPath.
-func (x XDelta) ApplyFullPatch(ctx context.Context, patchPath string, newPath string) error {
-	// Decompress, source window <num>, force overwrite.
-	cmd := exec.CommandContext(ctx, x.binPath, "-d", "-B", "536870912", "-f", patchPath, newPath)
-	if err := cmd.Run(); err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			return fmt.Errorf("applying full patch %q to get %q failed: %w; xdelta said: %s",
-				patchPath, newPath, err, string(exitErr.Stderr))
-		}
-		return fmt.Errorf("applying full patch %q to get %q failed: %w",
-			patchPath, newPath, err)
+	hash := sha256.New()
+	wrappedStdout := io.TeeReader(stdout, hash)
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("%s failed (start xdelta): %w", what, err)
 	}
+
+	file, err := os.Create(newPath)
+	if err != nil {
+		return fmt.Errorf("%s failed (create file): %w", what, err)
+	}
+	defer file.Close()
+
+	_, err = io.Copy(file, wrappedStdout)
+	if err != nil {
+		return fmt.Errorf("%s failed (write file): %w", what, err)
+	}
+
+	if err := cmd.Wait(); err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			return fmt.Errorf("%s failed: %w; xdelta said: %s",
+				what, err, string(exitErr.Stderr))
+		}
+		return fmt.Errorf("%s failed: %w", what, err)
+	}
+
+	checksum := hex.EncodeToString(hash.Sum(nil))
+	if !strings.EqualFold(checksum, expectedChecksum) {
+		return fmt.Errorf("%s failed: expected it to produce file with checksum %s but got %s",
+			what, expectedChecksum, checksum)
+	}
+
 	return nil
 }

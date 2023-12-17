@@ -49,6 +49,7 @@ type PatcherConfig struct {
 type measuredFile struct {
 	filename string
 	checksum string
+	modTime  time.Time
 }
 
 // runVerifyPhase runs the entire verification phase.
@@ -86,11 +87,16 @@ func runVerifyPhase(
 				return measuredFile{}, fmt.Errorf("failed to open %q to compute checksum: %w", realFilename, err)
 			}
 			defer file.Close()
+			fileInfo, err := file.Stat()
+			if err != nil {
+				return measuredFile{}, fmt.Errorf("failed to get basic metadata of %q: %w", realFilename, err)
+			}
 			checksum, err := HashReader(ctx, file)
 			if err != nil {
-				return measuredFile{}, fmt.Errorf("failed to open compute checksum of %q: %w", realFilename, err)
+				return measuredFile{}, fmt.Errorf("failed to compute checksum of %q: %w", realFilename, err)
 			}
-			return measuredFile{filename, checksum}, nil
+
+			return measuredFile{filename, checksum, fileInfo.ModTime()}, nil
 		},
 		toMeasure,
 		numWorkers,
@@ -101,6 +107,7 @@ func runVerifyPhase(
 	checksums := make(map[string]string, len(toMeasure))
 	for _, mf := range measuredFiles {
 		checksums[mf.filename] = mf.checksum
+		manifest.Add(mf.filename, mf.modTime, mf.checksum)
 	}
 	actions := DetermineActions(instructions, manifest, existingFiles, checksums)
 	return &actions, nil
@@ -155,6 +162,7 @@ func runPatchPhase(
 	ctx context.Context,
 	toUpdate []UpdateInstr,
 	toDelete []string,
+	manifest *Manifest,
 	installDir string,
 	xdelta *XDelta,
 	progress *ProgressTracker,
@@ -174,9 +182,9 @@ func runPatchPhase(
 			newPath := filepath.Join(installDir, ui.TempFilename)
 			if ui.IsDelta {
 				oldPath := filepath.Join(installDir, ui.FilePath)
-				return xdelta.ApplyDeltaPatch(ctx, oldPath, patchPath, newPath)
+				return xdelta.ApplyPatch(ctx, &oldPath, patchPath, newPath, ui.Checksum)
 			} else {
-				return xdelta.ApplyFullPatch(ctx, patchPath, newPath)
+				return xdelta.ApplyPatch(ctx, nil, patchPath, newPath, ui.Checksum)
 			}
 		},
 		toUpdate,
@@ -200,6 +208,13 @@ func runPatchPhase(
 		if err := os.Rename(tempPath, realPath); err != nil {
 			return fmt.Errorf("failed to move patched file %q to %q: %w", tempPath, realPath, err)
 		}
+		fileInfo, err := os.Stat(realPath)
+		if err != nil {
+			return fmt.Errorf("failed to get basic metadata of %q: %w", realPath, err)
+		}
+
+		// File hash is checked during xdelta operations, so it should be safe to add this to the manifest.
+		manifest.Add(ui.FilePath, fileInfo.ModTime(), ui.Checksum)
 	}
 
 	if len(toDelete) > 0 {
@@ -281,6 +296,7 @@ func RunPatcher(ctx context.Context, instructions []Instruction, config PatcherC
 		ctx,
 		actions.ToUpdate,
 		actions.ToDelete,
+		manifest,
 		config.InstallDir,
 		xdelta,
 		progress,
@@ -295,6 +311,10 @@ func RunPatcher(ctx context.Context, instructions []Instruction, config PatcherC
 		Msg("Operation successful, removing downloaded patches.")
 	if err := os.RemoveAll(patchDir); err != nil {
 		return fmt.Errorf("failed to remove patch dir %q: %w", patchDir, err)
+	}
+
+	if err := manifest.WriteManifest(config.InstallDir); err != nil {
+		return err
 	}
 
 	return nil

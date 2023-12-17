@@ -47,6 +47,9 @@ type UpdateInstr struct {
 
 	// Whether the patch should be applied as a delta patch.
 	IsDelta bool
+
+	// The final hash the file should have.
+	Checksum string
 }
 
 // DeterminedActions are the result of DetermineActions.
@@ -121,6 +124,7 @@ func DetermineActions(
 				PatchPath:    fullPatchLocalPath,
 				TempFilename: tempPath,
 				IsDelta:      false,
+				Checksum:     *instr.NewHash,
 			}
 		} else if manifest.Check(instr.Path, fileInfo.ModTime, *instr.NewHash) ||
 			strings.EqualFold(fileChecksums[instr.Path], *instr.NewHash) {
@@ -141,6 +145,7 @@ func DetermineActions(
 				PatchPath:    deltaPatchLocalPath,
 				TempFilename: tempPath,
 				IsDelta:      true,
+				Checksum:     *instr.NewHash,
 			}
 		} else {
 			// File doesn't match checksum.
@@ -155,6 +160,7 @@ func DetermineActions(
 				PatchPath:    fullPatchLocalPath,
 				TempFilename: tempPath,
 				IsDelta:      false,
+				Checksum:     *instr.NewHash,
 			}
 		}
 	}
