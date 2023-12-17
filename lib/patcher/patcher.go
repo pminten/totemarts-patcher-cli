@@ -11,8 +11,30 @@ import (
 )
 
 type PatcherConfig struct {
+	// URL containing instructions.json
+	BaseUrl *url.URL
+
 	// Directory where the game should be installed.
 	InstallDir string
+
+	// Product name that should be stored in the manifest.
+	Product string
+
+	// How many concurrent workers in verify phase.
+	VerifyWorkers int
+
+	// How many concurrent workers in download phase.
+	DownloadWorkers int
+
+	// How many concurrent workers in apply phase.
+	ApplyWorkers int
+
+	// Configuration of the download system.
+	DownloadConfig DownloadConfig
+
+	// Where to find the xdelta binary. If just a basename without directory
+	// will look in PATH and also in the current directory.
+	XDeltaBinPath string
 }
 
 // Helper tuple for measuring a file.
@@ -29,9 +51,8 @@ func runVerifyPhase(
 	manifest *Manifest,
 	installDir string,
 	numWorkers int,
+	progress *Progress,
 ) (*DeterminedActions, error) {
-	// TODO: Emit progress, add logs.
-
 	log.Info().
 		Str("install_dir", installDir).
 		Msg("Scanning files in installation directory.")
@@ -45,9 +66,12 @@ func runVerifyPhase(
 		Int("files_to_measure", len(toMeasure)).
 		Msg("Computing checksums of files.")
 
+	progress.SetPhaseNeeded(PhaseVerify, len(toMeasure))
 	measuredFiles, err := DoInParallelWithResult[string, measuredFile](
 		ctx,
-		func(ctx context.Context, filename string) (measuredFile, error) {
+		func(ctx context.Context, filename string) (mf measuredFile, retErr error) {
+			progress.PhaseItemStarted(PhaseVerify)
+			defer progress.PhaseItemDone(PhaseVerify, retErr)
 			realFilename := filepath.Join(installDir, filename)
 			reader, err := os.Open(realFilename)
 			if err != nil {
@@ -78,18 +102,29 @@ func runDownloadPhase(
 	toDownload []DownloadInstr,
 	installDir string,
 	baseUrl *url.URL,
-	downloader *Downloader,
+	downloadConfig DownloadConfig,
+	progress *Progress,
 	numWorkers int,
 ) error {
-	// TODO: Progress.
+	// Stop the downloader automatically.
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	downloader := NewDownloader(downloadConfig, func(stats DownloadStats) {
+		progress.UpdateDownloadStats(stats)
+	}, ctx)
+
 	log.Info().
 		Str("install_dir", installDir).
 		Stringer("base_url", baseUrl).
 		Int("files_to_download", len(toDownload)).
 		Msg("Downloading patch files.")
+	progress.SetPhaseNeeded(PhaseDownload, len(toDownload))
 	err := DoInParallel(
 		ctx,
-		func(ctx context.Context, di DownloadInstr) error {
+		func(ctx context.Context, di DownloadInstr) (retErr error) {
+			progress.PhaseItemStarted(PhaseDownload)
+			defer progress.PhaseItemDone(PhaseDownload, retErr)
 			return downloader.DownloadFile(
 				ctx,
 				baseUrl.JoinPath(di.RemotePath),
@@ -113,16 +148,19 @@ func runPatchPhase(
 	toDelete []string,
 	installDir string,
 	xdelta *XDelta,
+	progress *Progress,
 	numWorkers int,
 ) error {
-	// TODO: Progress.
 	log.Info().
 		Str("install_dir", installDir).
 		Int("files_to_patch", len(toUpdate)).
 		Msg("Patching files.")
+	progress.SetPhaseNeeded(PhaseApply, len(toUpdate))
 	err := DoInParallel(
 		ctx,
-		func(ctx context.Context, ui UpdateInstr) error {
+		func(ctx context.Context, ui UpdateInstr) (retErr error) {
+			progress.PhaseItemStarted(PhaseApply)
+			progress.PhaseItemDone(PhaseApply, retErr)
 			patchPath := filepath.Join(installDir, ui.PatchPath)
 			newPath := filepath.Join(installDir, ui.TempFilename)
 			if ui.IsDelta {
@@ -165,6 +203,71 @@ func runPatchPhase(
 	return nil
 }
 
-func RunPatcher() {
+func RunPatcher(ctx context.Context, instructions []Instruction, config PatcherConfig) error {
+	xdelta, err := NewXDelta(config.XDeltaBinPath)
+	if err != nil {
+		return err
+	}
 
+	manifest, err := ReadManifest(config.InstallDir, config.Product)
+	if err != nil {
+		return err
+	}
+
+	progress := NewProgress()
+
+	// These paths are also hardcoded in the determination logic.
+	patchDir := filepath.Join(config.InstallDir, "patch")
+	patchApplyDir := filepath.Join(config.InstallDir, "patch/apply")
+
+	if err = os.MkdirAll(patchApplyDir, 0755); err != nil {
+		return fmt.Errorf("couldn't create patch and patch apply directories %q: %w", patchApplyDir, err)
+	}
+
+	actions, err := runVerifyPhase(
+		ctx,
+		instructions,
+		manifest,
+		config.InstallDir,
+		config.VerifyWorkers,
+		progress,
+	)
+	if err != nil {
+		return err
+	}
+
+	err = runDownloadPhase(
+		ctx,
+		actions.ToDownload,
+		config.InstallDir,
+		config.BaseUrl,
+		config.DownloadConfig,
+		progress,
+		config.DownloadWorkers,
+	)
+	if err != nil {
+		return err
+	}
+
+	err = runPatchPhase(
+		ctx,
+		actions.ToUpdate,
+		actions.ToDelete,
+		config.InstallDir,
+		xdelta,
+		progress,
+		config.ApplyWorkers,
+	)
+	if err != nil {
+		return err
+	}
+
+	log.Info().
+		Str("patch_dir", patchDir).
+		Msg("Operation successful, removing downloaded patches.")
+	if err := os.RemoveAll(patchDir); err != nil {
+		return fmt.Errorf("failed to remove patch dir %q: %w", patchDir, err)
+	}
+
+	return nil
 }

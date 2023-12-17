@@ -40,19 +40,26 @@ func NewManifest(product string) *Manifest {
 }
 
 // ReadManifest reads a manifest from the standard location in the installation dir.
-// The caller should validate the Product field. Returns nil if there's no manifest file.
-func ReadManifest(installDir string) (*Manifest, error) {
+// Verifies that the manifest has the correct product field set. Returns an empty manifest
+// if there's no manifest file.
+func ReadManifest(installDir string, product string) (*Manifest, error) {
 	filename := filepath.Join(installDir, ManifestFilename)
 	data, err := os.ReadFile(filename)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			return nil, nil
+			return NewManifest(product), nil
 		}
 		return nil, fmt.Errorf("couldn't read manifest at %q: %w", filename, err)
 	}
 	var manifest Manifest
 	if err := json.Unmarshal(data, &manifest); err != nil {
 		return nil, fmt.Errorf("couldn't decode manifest at %q: %w", filename, err)
+	}
+	if manifest.Product != product {
+		return nil, fmt.Errorf(
+			"manifest contains wrong product (are you updating the wrong game?), expected %q got %q",
+			product, manifest.Product,
+		)
 	}
 	return &manifest, nil
 }

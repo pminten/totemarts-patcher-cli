@@ -58,13 +58,10 @@ type DownloadConfig struct {
 // DownloadStats are current information about the download activity.
 type DownloadStats struct {
 	// Running average of download speed in bytes/second.
-	DownloadSpeed int64
+	Speed int64
 
 	// Total number of bytes downloaded.
 	TotalBytes int64
-
-	// TOtal number of completed downloads.
-	TotalDownloads int
 }
 
 // A downloadRecord is used to keep track of which files are downloading.
@@ -92,12 +89,15 @@ type downloadObserver struct {
 	hash hash.Hash
 }
 
-// NewDownloader creates a new downloader. Pass retry configuration and over how many seconds
-// the download speed should be averaged.
+// NewDownloader creates a new downloader. Pass configuration and a function that will
+// receive the download stats every second. Will run the tick func every second until
+// the context is canceled.
 func NewDownloader(
 	config DownloadConfig,
+	statsFunc func(DownloadStats),
+	tickFuncCtx context.Context,
 ) *Downloader {
-	return &Downloader{
+	d := &Downloader{
 		mu:                        sync.Mutex{},
 		config:                    DownloadConfig{},
 		downloads:                 make(map[string]*downloadRecord),
@@ -106,19 +106,27 @@ func NewDownloader(
 		bytesDownloadedTotal:      0,
 		downloadCount:             0,
 	}
-}
-
-// Tick performs per second bookkeeping. Should be called once per second.
-func (d *Downloader) Tick() DownloadStats {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	d.downloadSpeed.Add(float64(d.bytesDownloadedThisSecond))
-	d.bytesDownloadedThisSecond = 0
-	return DownloadStats{
-		DownloadSpeed:  int64(d.downloadSpeed.Average()),
-		TotalBytes:     d.bytesDownloadedTotal,
-		TotalDownloads: int(d.downloadCount),
-	}
+	go func() {
+		timer := time.NewTimer(time.Second)
+		for {
+			select {
+			case <-timer.C:
+				statsFunc(d.tick())
+			case <-tickFuncCtx.Done():
+				timer.Stop()
+				d.mu.Lock()
+				defer d.mu.Unlock()
+				// Fake an update to force speed to 0, otherwise it might get stuck at
+				// a higher value and that looks silly.
+				statsFunc(DownloadStats{
+					Speed:      0,
+					TotalBytes: d.bytesDownloadedTotal,
+				})
+				return
+			}
+		}
+	}()
+	return d
 }
 
 // DownloadFile downloads a file to disk. It also verifies a SHA256 hash.
@@ -256,6 +264,18 @@ func (d *Downloader) register(downloadUrl *url.URL, filename string, downloadIdx
 		hash: sha256.New(),
 	}
 	return observer, nil
+}
+
+// Perform per-second bookkeeping and return download stats to be propagated.
+func (d *Downloader) tick() DownloadStats {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.downloadSpeed.Add(float64(d.bytesDownloadedThisSecond))
+	d.bytesDownloadedThisSecond = 0
+	return DownloadStats{
+		Speed:      int64(d.downloadSpeed.Average()),
+		TotalBytes: d.bytesDownloadedTotal,
+	}
 }
 
 // Write implements (io.Writer).Write
