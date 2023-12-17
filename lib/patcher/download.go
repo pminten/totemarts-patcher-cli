@@ -181,7 +181,7 @@ func (d *Downloader) DownloadFile(
 				Stringer("download_url", downloadUrl).
 				Str("filename", filename).
 				Int("attempt", attempt). // Make it easier for one-based readers.
-				Int("max_retries", config.MaxAttempts).
+				Int("max_attempts", config.MaxAttempts).
 				Stringer("wait_time", waitTime).
 				Err(err).
 				Msg("Download failed, will retry after a short wait.")
