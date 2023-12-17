@@ -123,9 +123,9 @@ func DetermineActions(
 				IsDelta:      false,
 			}
 		} else if manifest.Check(instr.Path, fileInfo.ModTime, *instr.NewHash) ||
-			fileChecksums[instr.Path] == *instr.NewHash {
+			strings.EqualFold(fileChecksums[instr.Path], *instr.NewHash) {
 			continue // Already up to date.
-		} else if instr.DeltaHash != nil && fileChecksums[instr.Path] == instr.OldHash {
+		} else if instr.DeltaHash != nil && strings.EqualFold(fileChecksums[instr.Path], instr.OldHash) {
 			// Can use (hopefully much smaller) delta file to upgrade.
 			deltaFilename := fmt.Sprintf("%s_from_%s", *instr.NewHash, instr.OldHash)
 			deltaPatchRemotePath := path.Join("delta", deltaFilename)

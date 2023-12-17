@@ -157,7 +157,7 @@ func (d *Downloader) DownloadFile(
 		defer existingFile.Close()
 		// Checking for expected size avoids reading the whole file if there's no way it can match.
 		if fileInfo, err := existingFile.Stat(); err == nil && fileInfo.Size() == expectedSize {
-			if checksum, err := HashReader(ctx, existingFile); err == nil && checksum == expectedChecksum {
+			if cs, err := HashReader(ctx, existingFile); err == nil && strings.EqualFold(cs, expectedChecksum) {
 				log.Debug().
 					Stringer("download_url", downloadUrl).
 					Str("filename", filename).

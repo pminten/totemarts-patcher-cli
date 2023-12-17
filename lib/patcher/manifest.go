@@ -8,6 +8,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -93,5 +94,5 @@ func (m *Manifest) Check(filename string, lastChange time.Time, checksum string)
 	if !found {
 		return false
 	}
-	return entry.LastChange.Equal(lastChange) && entry.LastChecksum == checksum
+	return entry.LastChange.Equal(lastChange) && strings.EqualFold(entry.LastChecksum, checksum)
 }
