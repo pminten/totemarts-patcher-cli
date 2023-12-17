@@ -72,9 +72,6 @@ type downloadRecord struct {
 	downloadUrl   *url.URL
 	bytesReceived int64
 
-	// Whether the download is done and successful. Notably doesn't get set on errors.
-	done bool
-
 	// Used in some error detection code.
 	downloadIdx int64
 }
@@ -237,7 +234,6 @@ func (d *Downloader) doDownloadFile(
 
 	observer.dip.d.mu.Lock()
 	defer observer.dip.d.mu.Unlock()
-	observer.dip.done = true // At this point we know the download was successful.
 	actualChecksum := hex.EncodeToString(observer.hash.Sum(nil))
 	if !strings.EqualFold(expectedChecksum, actualChecksum) {
 		return fmt.Errorf("downloaded file has invalid checksum for %q downloaded to %q, expected %s, got %s",
