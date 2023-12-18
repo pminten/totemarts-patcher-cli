@@ -24,11 +24,11 @@ func ScanFiles(rootDir string) (map[string]BasicFileInfo, error) {
 			return nil
 		}
 		if err != nil {
-			return fmt.Errorf("error while scanning file %q: %w", path, err)
+			return fmt.Errorf("error while scanning file '%s': %w", path, err)
 		}
 		info, err := d.Info()
 		if err != nil {
-			return fmt.Errorf("error while statting file %q: %w", path, err)
+			return fmt.Errorf("error while statting file '%s': %w", path, err)
 		}
 		infos[filepath.Clean(path)] = BasicFileInfo{ModTime: info.ModTime()}
 		return nil

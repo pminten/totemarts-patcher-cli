@@ -26,14 +26,14 @@ func NewXDelta(binPath string) (*XDelta, error) {
 	if dir, _ := filepath.Split(binPath); dir == "" {
 		realPath, err := exec.LookPath(binPath)
 		if err != nil && !errors.Is(err, exec.ErrDot) {
-			return nil, fmt.Errorf("failed to find %q in PATH: %w", binPath, err)
+			return nil, fmt.Errorf("failed to find '%s' in PATH: %w", binPath, err)
 		}
 		return &XDelta{
 			binPath: realPath,
 		}, nil
 	}
 	if _, err := os.Stat(binPath); err != nil {
-		return nil, fmt.Errorf("failed to find %q: %w", binPath, err)
+		return nil, fmt.Errorf("failed to find '%s': %w", binPath, err)
 	}
 	return &XDelta{
 		binPath: binPath,
@@ -57,12 +57,12 @@ func (x XDelta) ApplyPatch(
 		// Decompress, source window <num>, force overwrite.
 		// Source window number is copied from Vue/Electron launcher.
 		cmd = exec.CommandContext(ctx, x.binPath, "-d", "-B", "536870912", "-f", patchPath)
-		what = fmt.Sprintf("applying full patch %q to get %q", patchPath, newPath)
+		what = fmt.Sprintf("applying full patch '%s' to get '%s'", patchPath, newPath)
 	} else {
 		// Decompress, source window <num>, force overwrite, source file to copy from (oldPath).
 		cmd = exec.CommandContext(ctx, x.binPath, "-d", "-B", "536870912", "-f", "-s", *oldPath, patchPath)
 		what = "delta patch"
-		what = fmt.Sprintf("applying full patch %q to %q to get %q", patchPath, *oldPath, newPath)
+		what = fmt.Sprintf("applying full patch '%s' to '%s' to get '%s'", patchPath, *oldPath, newPath)
 	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

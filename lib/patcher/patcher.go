@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/rs/zerolog/log"
+	"log"
 )
 
 type PatcherConfig struct {
@@ -62,38 +62,35 @@ func runVerifyPhase(
 	numWorkers int,
 	progress *ProgressTracker,
 ) (*DeterminedActions, error) {
-	log.Info().
-		Str("install_dir", installDir).
-		Msg("Scanning files in installation directory.")
+	log.Printf("Scanning files in installation directory '%s'.", installDir)
 	existingFiles, err := ScanFiles(installDir)
 	if err != nil {
 		return nil, err // ScanFiles adds enough context, no need for fmt.Errorf
 	}
 
 	toMeasure := DetermineFilesToMeasure(instructions, manifest, existingFiles)
-	log.Info().
-		Int("files_to_measure", len(toMeasure)).
-		Msg("Computing checksums of files.")
+	log.Printf("Computing checksums of %d files.", len(toMeasure))
 
 	progress.SetPhaseNeeded(PhaseVerify, len(toMeasure))
 	measuredFiles, err := DoInParallelWithResult[string, measuredFile](
 		ctx,
 		func(ctx context.Context, filename string) (mf measuredFile, retErr error) {
+			realFilename := filepath.Join(installDir, filename)
+			LogVerbose(ctx, "Computing checksum of '%s'.", realFilename)
 			progress.PhaseItemStarted(PhaseVerify)
 			defer progress.PhaseItemDone(PhaseVerify, retErr)
-			realFilename := filepath.Join(installDir, filename)
 			file, err := os.Open(realFilename)
 			if err != nil {
-				return measuredFile{}, fmt.Errorf("failed to open %q to compute checksum: %w", realFilename, err)
+				return measuredFile{}, fmt.Errorf("failed to open '%s' to compute checksum: %w", realFilename, err)
 			}
 			defer file.Close()
 			fileInfo, err := file.Stat()
 			if err != nil {
-				return measuredFile{}, fmt.Errorf("failed to get basic metadata of %q: %w", realFilename, err)
+				return measuredFile{}, fmt.Errorf("failed to get basic metadata of '%s': %w", realFilename, err)
 			}
 			checksum, err := HashReader(ctx, file)
 			if err != nil {
-				return measuredFile{}, fmt.Errorf("failed to compute checksum of %q: %w", realFilename, err)
+				return measuredFile{}, fmt.Errorf("failed to compute checksum of '%s': %w", realFilename, err)
 			}
 
 			return measuredFile{filename, checksum, fileInfo.ModTime()}, nil
@@ -130,20 +127,18 @@ func runDownloadPhase(
 		progress.UpdateDownloadStats(stats)
 	}, ctx)
 
-	log.Info().
-		Str("install_dir", installDir).
-		Stringer("base_url", baseUrl).
-		Int("files_to_download", len(toDownload)).
-		Msg("Downloading patch files.")
+	log.Printf("Downloading %d patch files.", len(toDownload))
 	progress.SetPhaseNeeded(PhaseDownload, len(toDownload))
 	err := DoInParallel(
 		ctx,
 		func(ctx context.Context, di DownloadInstr) (retErr error) {
+			remoteUrl := baseUrl.JoinPath(di.RemotePath)
+			LogVerbose(ctx, "Downloading '%s'.", remoteUrl)
 			progress.PhaseItemStarted(PhaseDownload)
 			defer progress.PhaseItemDone(PhaseDownload, retErr)
 			return downloader.DownloadFile(
 				ctx,
-				baseUrl.JoinPath(di.RemotePath),
+				remoteUrl,
 				filepath.Join(installDir, di.LocalPath),
 				di.Checksum,
 				di.Size,
@@ -168,18 +163,16 @@ func runPatchPhase(
 	progress *ProgressTracker,
 	numWorkers int,
 ) error {
-	log.Info().
-		Str("install_dir", installDir).
-		Int("files_to_patch", len(toUpdate)).
-		Msg("Patching files.")
+	log.Printf("Patching %d files.", len(toUpdate))
 	progress.SetPhaseNeeded(PhaseApply, len(toUpdate))
 	err := DoInParallel(
 		ctx,
 		func(ctx context.Context, ui UpdateInstr) (retErr error) {
-			progress.PhaseItemStarted(PhaseApply)
-			progress.PhaseItemDone(PhaseApply, retErr)
 			patchPath := filepath.Join(installDir, ui.PatchPath)
 			newPath := filepath.Join(installDir, ui.TempFilename)
+			LogVerbose(ctx, "Applying patch '%s' to get '%s'.", patchPath, newPath)
+			progress.PhaseItemStarted(PhaseApply)
+			defer progress.PhaseItemDone(PhaseApply, retErr)
 			if ui.IsDelta {
 				oldPath := filepath.Join(installDir, ui.FilePath)
 				return xdelta.ApplyPatch(ctx, &oldPath, patchPath, newPath, ui.Checksum)
@@ -194,23 +187,21 @@ func runPatchPhase(
 		return err
 	}
 
-	log.Info().
-		Str("install_dir", installDir).
-		Int("files_to_move", len(toUpdate)).
-		Msg("Moving patched files into place.")
+	log.Printf("Moving %d patched files into place.", len(toUpdate))
 	for _, ui := range toUpdate {
 		tempPath := filepath.Join(installDir, ui.TempFilename)
 		realPath := filepath.Join(installDir, ui.FilePath)
+		LogVerbose(ctx, "Moving '%s' to '%s'.", tempPath, realPath)
 		realDir := filepath.Dir(realPath)
 		if err := os.MkdirAll(realDir, 0755); err != nil {
-			return fmt.Errorf("failed to ensure directories for patched file %q exist: %w", realPath, err)
+			return fmt.Errorf("failed to ensure directories for patched file '%s' exist: %w", realPath, err)
 		}
 		if err := os.Rename(tempPath, realPath); err != nil {
-			return fmt.Errorf("failed to move patched file %q to %q: %w", tempPath, realPath, err)
+			return fmt.Errorf("failed to move patched file '%s' to '%s': %w", tempPath, realPath, err)
 		}
 		fileInfo, err := os.Stat(realPath)
 		if err != nil {
-			return fmt.Errorf("failed to get basic metadata of %q: %w", realPath, err)
+			return fmt.Errorf("failed to get basic metadata of '%s': %w", realPath, err)
 		}
 
 		// File hash is checked during xdelta operations, so it should be safe to add this to the manifest.
@@ -218,15 +209,13 @@ func runPatchPhase(
 	}
 
 	if len(toDelete) > 0 {
-		log.Info().
-			Str("install_dir", installDir).
-			Int("files_to_delete", len(toDelete)).
-			Msg("Deleting obsolete files (if any).")
+		log.Printf("Deleting %d obsolete files.", len(toDelete))
 	}
 	for _, path := range toDelete {
 		realPath := filepath.Join(installDir, path)
+		LogVerbose(ctx, "Removing obsolete file '%s'.", realPath)
 		if err := os.Remove(realPath); err != nil {
-			return fmt.Errorf("failed to remove file %q: %w", realPath, err)
+			return fmt.Errorf("failed to remove file '%s': %w", realPath, err)
 		}
 	}
 
@@ -249,7 +238,7 @@ func RunPatcher(ctx context.Context, instructions []Instruction, config PatcherC
 	patchApplyDir := filepath.Join(config.InstallDir, "patch/apply")
 
 	if err = os.MkdirAll(patchApplyDir, 0755); err != nil {
-		return fmt.Errorf("couldn't create patch and patch apply directories %q: %w", patchApplyDir, err)
+		return fmt.Errorf("couldn't create patch and patch apply directories '%s': %w", patchApplyDir, err)
 	}
 
 	progress := NewProgress()
@@ -307,11 +296,9 @@ func RunPatcher(ctx context.Context, instructions []Instruction, config PatcherC
 		return err
 	}
 
-	log.Info().
-		Str("patch_dir", patchDir).
-		Msg("Operation successful, removing downloaded patches.")
+	log.Printf("Operation successful, removing directory with downloaded patches '%s'.", patchDir)
 	if err := os.RemoveAll(patchDir); err != nil {
-		return fmt.Errorf("failed to remove patch dir %q: %w", patchDir, err)
+		return fmt.Errorf("failed to remove patch dir '%s': %w", patchDir, err)
 	}
 
 	if err := manifest.WriteManifest(config.InstallDir); err != nil {

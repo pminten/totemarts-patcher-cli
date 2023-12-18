@@ -50,15 +50,15 @@ func ReadManifest(installDir string, product string) (*Manifest, error) {
 		if errors.Is(err, fs.ErrNotExist) {
 			return NewManifest(product), nil
 		}
-		return nil, fmt.Errorf("couldn't read manifest at %q: %w", filename, err)
+		return nil, fmt.Errorf("couldn't read manifest at '%s': %w", filename, err)
 	}
 	var manifest Manifest
 	if err := json.Unmarshal(data, &manifest); err != nil {
-		return nil, fmt.Errorf("couldn't decode manifest at %q: %w", filename, err)
+		return nil, fmt.Errorf("couldn't decode manifest at '%s': %w", filename, err)
 	}
 	if manifest.Product != product {
 		return nil, fmt.Errorf(
-			"manifest contains wrong product (are you updating the wrong game?), expected %q got %q",
+			"manifest contains wrong product (are you updating the wrong game?), expected '%s' got '%s'",
 			product, manifest.Product,
 		)
 	}
@@ -75,7 +75,7 @@ func (m *Manifest) WriteManifest(installDir string) error {
 	}
 
 	if err := os.WriteFile(filename, encoded, 0644); err != nil {
-		return fmt.Errorf("couldn't write manifest to %q: %w", filename, err)
+		return fmt.Errorf("couldn't write manifest to '%s': %w", filename, err)
 	}
 
 	return nil

@@ -8,14 +8,13 @@ import (
 	"fmt"
 	"hash"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"os"
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/rs/zerolog/log"
 )
 
 var errOurTimeout = errors.New("[TA] timeout")
@@ -175,10 +174,7 @@ func (d *Downloader) DownloadFile(
 		// Checking for expected size avoids reading the whole file if there's no way it can match.
 		if fileInfo, err := existingFile.Stat(); err == nil && fileInfo.Size() == expectedSize {
 			if cs, err := HashReader(ctx, existingFile); err == nil && strings.EqualFold(cs, expectedChecksum) {
-				log.Debug().
-					Stringer("download_url", downloadUrl).
-					Str("filename", filename).
-					Msg("Patch file is already present, skipping download.")
+				log.Printf("Patch file '%s' is already present, skipping download.", filename)
 				return nil
 			}
 		}
@@ -191,14 +187,13 @@ func (d *Downloader) DownloadFile(
 			if attempt > config.MaxAttempts {
 				return err
 			}
-			log.Info().
-				Stringer("download_url", downloadUrl).
-				Str("filename", filename).
-				Int("attempt", attempt). // Make it easier for one-based readers.
-				Int("max_attempts", config.MaxAttempts).
-				Stringer("wait_time", waitTime).
-				Err(err).
-				Msg("Download failed, will retry after a short wait.")
+			if errors.Is(err, context.Canceled) {
+				// Don't log cancelations, those likely aren't errors.
+				return err
+			}
+			// URL is already in the error message, probably twice, no need to add it here.
+			log.Printf("Download failed [attempt %d/%d, waiting %s until next attempt]: %s",
+				attempt, config.MaxAttempts, waitTime, err)
 
 			// This mainly works because the durations are going to be fairly small so overflows are unlikely.
 			attempt++
@@ -232,7 +227,7 @@ func (d *Downloader) doDownloadFile(
 
 	file, err := os.Create(filename)
 	if err != nil {
-		return fmt.Errorf("failed to open %q for downloading %q to: %w", filename, downloadUrl, err)
+		return fmt.Errorf("failed to open '%s' for downloading '%s' to: %w", filename, downloadUrl, err)
 	}
 	defer file.Close()
 
@@ -250,7 +245,7 @@ func (d *Downloader) doDownloadFile(
 	}()
 	req, err := http.NewRequestWithContext(doCtx, http.MethodGet, downloadUrl.String(), nil)
 	if err != nil {
-		return fmt.Errorf("failed to create request to download %q: %w", downloadUrl, err)
+		return fmt.Errorf("failed to create request to download '%s': %w", downloadUrl, err)
 	}
 
 	resp, err := http.DefaultClient.Do(req)
@@ -261,13 +256,13 @@ func (d *Downloader) doDownloadFile(
 		if errors.Is(err, context.Canceled) && errors.Is(context.Cause(doCtx), errOurTimeout) {
 			err = fmt.Errorf("request timeout (%s) exceeded", d.config.DownloadRequestTimeout)
 		}
-		return fmt.Errorf("failed to request download of %q: %w", downloadUrl, err)
+		return fmt.Errorf("failed to request download of '%s': %w", downloadUrl, err)
 	}
 	close(doDoneChan)
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("failed to download %q to %q (status %d)", downloadUrl, filename, resp.StatusCode)
+		return fmt.Errorf("failed to download '%s' to '%s' (status %d)", downloadUrl, filename, resp.StatusCode)
 	}
 
 	watchdogCtx, cancelWatchdog := context.WithCancel(ctx)
@@ -298,7 +293,7 @@ func (d *Downloader) doDownloadFile(
 		if errors.Is(err, context.Canceled) && errors.Is(context.Cause(doCtx), errOurStall) {
 			err = fmt.Errorf("download stalled for at least %s", d.config.DownloadStallTimeout)
 		}
-		return fmt.Errorf("failed to download %q to %q: %w", downloadUrl, filename, err)
+		return fmt.Errorf("failed to download '%s' to '%s': %w", downloadUrl, filename, err)
 
 	}
 
@@ -306,7 +301,7 @@ func (d *Downloader) doDownloadFile(
 	defer observer.mu.Unlock()
 	actualChecksum := hex.EncodeToString(observer.hash.Sum(nil))
 	if !strings.EqualFold(expectedChecksum, actualChecksum) {
-		return fmt.Errorf("downloaded file has invalid checksum for %q downloaded to %q, expected %s, got %s",
+		return fmt.Errorf("downloaded file has invalid checksum for '%s' downloaded to '%s', expected %s, got %s",
 			downloadUrl, filename, expectedChecksum, actualChecksum)
 	}
 	return nil
@@ -319,7 +314,7 @@ func (d *Downloader) register(downloadUrl *url.URL, filename string, downloadIdx
 	// If downloadIdx is the same it's a retry of the same download, not a new one.
 	if found && existing.downloadIdx != downloadIdx {
 		// Error message assumes register is only called from DownloadFile, which it should be.
-		return nil, fmt.Errorf("DownloadFile called twice for %q", filename)
+		return nil, fmt.Errorf("DownloadFile called twice for '%s'", filename)
 	}
 	dip := &downloadRecord{
 		d:             d,
