@@ -186,6 +186,12 @@ func (d *Downloader) DownloadFile(
 			// This mainly works because the durations are going to be fairly small so overflows are unlikely.
 			attempt++
 			waitTime = time.Duration(float64(waitTime) * config.RetryWaitIncrementFactor)
+			select {
+			case <-time.After(waitTime):
+				continue
+			case <-ctx.Done():
+				return ctx.Err()
+			}
 		} else {
 			return nil
 		}
