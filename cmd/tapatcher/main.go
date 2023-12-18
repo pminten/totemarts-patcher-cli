@@ -40,12 +40,40 @@ var CLI struct {
 	} `cmd:"" help:"Install or update a game."`
 }
 
+func byteStr(n int64) string {
+	if n < 1<<10 {
+		return fmt.Sprintf("%d B", n)
+	} else if n < 1<<20 {
+		return fmt.Sprintf("%.2f KiB", float64(n)/(1<<10))
+	} else if n < 1<<30 {
+		return fmt.Sprintf("%.2f MiB", float64(n)/(1<<20))
+	} else {
+		return fmt.Sprintf("%.2f GiB", float64(n)/(1<<30))
+	}
+}
+
 func Update(kongCtx *kong.Context) {
 	baseUrl, err := url.Parse(CLI.Update.BaseUrl)
 	kongCtx.FatalIfErrorf(err, "Base-url is not a valid URL.")
 
 	progressFunc := func(p patcher.Progress) {
-		fmt.Printf("%#v\n", p)
+		phaseProgress := func(pp patcher.ProgressPhase) string {
+			var perc float64
+			if pp.Needed > 0 {
+				perc = float64(pp.Completed) / float64(pp.Needed) * 100
+			} else {
+				perc = 0
+			}
+			if pp.Processing > 0 {
+				return fmt.Sprintf("%d/%d (%.1f%%, %d in progress)", pp.Completed, pp.Needed, perc, pp.Processing)
+			} else {
+				return fmt.Sprintf("%d/%d (%.1f%%)", pp.Completed, pp.Needed, perc)
+			}
+		}
+		fmt.Printf("Verify: %s, Download: %s, Apply: %s, DL: %s/s, %s total\n",
+			phaseProgress(p.Verify), phaseProgress(p.Download), phaseProgress(p.Apply),
+			byteStr(p.DownloadSpeed), byteStr(p.DownloadTotalBytes))
+
 	}
 
 	config := patcher.PatcherConfig{
