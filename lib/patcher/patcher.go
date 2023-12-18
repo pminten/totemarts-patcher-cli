@@ -255,6 +255,7 @@ func RunPatcher(ctx context.Context, instructions []Instruction, config PatcherC
 	progress := NewProgress()
 	go func() {
 		ticker := time.NewTicker(config.ProgressInterval)
+		defer ticker.Stop()
 		for {
 			select {
 			case <-ticker.C:
