@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"hash"
 	"io"
@@ -16,6 +17,9 @@ import (
 
 	"github.com/rs/zerolog/log"
 )
+
+var errOurTimeout = errors.New("[TA] timeout")
+var errOurStall = errors.New("[TA] stalled")
 
 // A Downloader manages downloads. Mainly it keeps track of progress and download speed.
 type Downloader struct {
@@ -53,6 +57,12 @@ type DownloadConfig struct {
 
 	// How many seconds to average the download speed over.
 	DownloadSpeedWindow int
+
+	// How much time to allow to send a request and receive the start of a response.
+	DownloadRequestTimeout time.Duration
+
+	// How much time to allow between receiving any data in a download.
+	DownloadStallTimeout time.Duration
 }
 
 // DownloadStats are current information about the download activity.
@@ -79,11 +89,17 @@ type downloadRecord struct {
 // A downloadObserver is used to track download measurements.
 type downloadObserver struct {
 	// Corresponding downloadInProgress structure. Everything reachable through this pointer
-	// is protected by the main downloader mutex.
+	// is protected by the main downloader mutex. It is NOT covered by mu.
 	dip *downloadRecord
 
-	// Hash in progress. NOT protected by the downloader mutex.
+	// Mutex covering all fields below this.
+	mu sync.Mutex
+
+	// Hash in progress.
 	hash hash.Hash
+
+	// How many seconds have passed without progress being made.
+	secondsWithoutData int
 }
 
 // NewDownloader creates a new downloader. Pass configuration and a function that will
@@ -105,6 +121,7 @@ func NewDownloader(
 	}
 	go func() {
 		ticker := time.NewTicker(time.Second)
+		defer ticker.Stop()
 		for {
 			select {
 			case <-ticker.C:
@@ -206,6 +223,8 @@ func (d *Downloader) doDownloadFile(
 	expectedChecksum string,
 	downloadIdx int64,
 ) error {
+	requestCtx, cancelRequestCtx := context.WithCancelCause(ctx)
+
 	observer, err := d.register(downloadUrl, filename, downloadIdx)
 	if err != nil {
 		return err
@@ -217,29 +236,74 @@ func (d *Downloader) doDownloadFile(
 	}
 	defer file.Close()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadUrl.String(), nil)
+	// This is for canceling the Do part, i.e. sending the request and reading the response headers
+	// (and a small bit of the response). It is similar to http.Client.Timeout but that doesn't work well
+	// here because it also covers the entire response body read time and that can be very significant.
+	doCtx, cancelDoCtx := context.WithCancelCause(requestCtx)
+	doDoneChan := make(chan struct{})
+	go func() {
+		select {
+		case <-time.After(d.config.DownloadRequestTimeout):
+			cancelDoCtx(errOurTimeout)
+		case <-doDoneChan:
+		}
+	}()
+	req, err := http.NewRequestWithContext(doCtx, http.MethodGet, downloadUrl.String(), nil)
 	if err != nil {
 		return fmt.Errorf("failed to create request to download %q: %w", downloadUrl, err)
 	}
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
+		// Higher levels of the code treat a cancellation error as normal, figuring someone might
+		// have pressed interrupt or something. By detecting this and explicitly setting the error
+		// to a non-canceled error this is avoided.
+		if errors.Is(err, context.Canceled) && errors.Is(context.Cause(doCtx), errOurTimeout) {
+			err = fmt.Errorf("request timeout (%s) exceeded", d.config.DownloadRequestTimeout)
+		}
 		return fmt.Errorf("failed to request download of %q: %w", downloadUrl, err)
 	}
+	close(doDoneChan)
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("failed to download %q to %q (status %d)", downloadUrl, filename, resp.StatusCode)
 	}
 
+	watchdogCtx, cancelWatchdog := context.WithCancel(ctx)
+	defer cancelWatchdog()
+	go func() {
+		ticker := time.NewTicker(time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				// Can avoid defer Unlock because all actions are simple and can't fail.
+				observer.mu.Lock()
+				secsWithoutData := observer.secondsWithoutData
+				observer.secondsWithoutData++
+				observer.mu.Unlock()
+				if time.Duration(secsWithoutData)*time.Second > d.config.DownloadStallTimeout {
+					cancelRequestCtx(errOurStall)
+				}
+			case <-watchdogCtx.Done():
+				return
+			}
+		}
+	}()
+
 	reader := io.TeeReader(resp.Body, observer)
 	_, err = io.Copy(file, reader)
 	if err != nil {
+		if errors.Is(err, context.Canceled) && errors.Is(context.Cause(doCtx), errOurStall) {
+			err = fmt.Errorf("download stalled for at least %s", d.config.DownloadStallTimeout)
+		}
 		return fmt.Errorf("failed to download %q to %q: %w", downloadUrl, filename, err)
+
 	}
 
-	observer.dip.d.mu.Lock()
-	defer observer.dip.d.mu.Unlock()
+	observer.mu.Lock()
+	defer observer.mu.Unlock()
 	actualChecksum := hex.EncodeToString(observer.hash.Sum(nil))
 	if !strings.EqualFold(expectedChecksum, actualChecksum) {
 		return fmt.Errorf("downloaded file has invalid checksum for %q downloaded to %q, expected %s, got %s",
@@ -285,7 +349,13 @@ func (d *Downloader) tick() DownloadStats {
 
 // Write implements (io.Writer).Write
 func (o *downloadObserver) Write(p []byte) (n int, err error) {
+	// Not using defer here to avoid the two mutexes being locked at the same time.
+	// While it shouldn't deadlock keeping lock regions small and non-overlapping simplifies
+	// reasoning about them.
+	o.mu.Lock()
 	o.hash.Write(p)
+	o.secondsWithoutData = 0
+	o.mu.Unlock()
 
 	o.dip.d.mu.Lock()
 	defer o.dip.d.mu.Unlock()
