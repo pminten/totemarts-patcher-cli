@@ -22,33 +22,34 @@ type ProgressTracker struct {
 }
 
 // Progress is current progress information.
+// Beware that this gets directly serialized for JSON progress output,
 type Progress struct {
 	// Running average of download speed in bytes per second.
-	DownloadSpeed int64
+	DownloadSpeed int64 `json:"download_speed"`
 
 	// Total bytes downloaded.
-	DownloadTotalBytes int64
+	DownloadTotalBytes int64 `json:"download_total_bytes"`
 
 	// Progress in the verify phase.
-	Verify ProgressPhase
+	Verify ProgressPhase `json:"verify"`
 
 	// Progress in the download phase.
-	Download ProgressPhase
+	Download ProgressPhase `json:"download"`
 
 	// Progress in the apply phase.
-	Apply ProgressPhase
+	Apply ProgressPhase `json:"apply"`
 }
 
 // ProgressPhase contains the progress in a particular phase.
 type ProgressPhase struct {
 	// How many items are being processed.
-	Processing int
+	Processing int `json:"processing"`
 	// How many items have been successfully processed.
-	Completed int
+	Completed int `json:"completed"`
 	// How many items have errored.
-	Errors int
+	Errors int `json:"errors"`
 	// How many items should be processed.
-	Needed int
+	Needed int `json:"needed"`
 }
 
 // NewProgress creates a progress tracker.

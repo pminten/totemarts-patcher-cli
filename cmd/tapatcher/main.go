@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/url"
 	"os"
 	"os/signal"
@@ -12,8 +14,6 @@ import (
 
 	"github.com/alecthomas/kong"
 	"github.com/pminten/totemarts-patcher-cli/lib/patcher"
-	"github.com/rs/zerolog"
-	"github.com/rs/zerolog/log"
 )
 
 var CLI struct {
@@ -28,15 +28,18 @@ var CLI struct {
 		ApplyWorkers     int    `name:"apply-workers" help:"Number of current patching processes."`
 		XDeltaPath       string `name:"xdelta" default:"xdelta3" help:"Path to xdelta3 binary. If no directory name will also look for this in PATH and the current directory."`
 
-		DownloadMaxAttempts int     `name:"download-max-attempts" default:"5" help:"How many times to try to download a file."`
-		DownloadBaseDelay   float64 `name:"download-base-delay" default:"1" help:"How many seconds to wait between download retries at first."`
-		DownloadDelayFactor float64 `name:"download-delay-factor" default:"1.5" help:"How much to multiply delay between download retries after each retry."`
-		DownloadSpeedWindow int     `name:"download-speed-window" default:"5" help:"How many seconds to average download speed over."`
+		DownloadMaxAttempts     int           `name:"download-max-attempts" default:"5" help:"How many times to try to download a file."`
+		DownloadBaseDelay       time.Duration `name:"download-base-delay" default:"1s" help:"How many seconds to wait between download retries at first."`
+		DownloadDelayFactor     float64       `name:"download-delay-factor" default:"1.5" help:"How much to multiply delay between download retries after each retry."`
+		DownloadSpeedWindow     int           `name:"download-speed-window" default:"5" help:"How many seconds to average download speed over."`
+		DownloadRequestTimemout time.Duration `name:"download-request-timeout" default:"30s" help:"How many seconds to allow before receiving the start of a download response."`
+		DownloadStallTimeout    time.Duration `name:"download-stall-timeout" default:"30s" help:"How many seconds to allow between receiving any data in a download."`
 
 		ProgressInterval int    `name:"progress-interval" default:"1" help:"How often to report progress."`
 		ProgressMode     string `name:"progress-mode" enum:"plain,fancy,json" default:"fancy" help:"How to report progress (plain, fancy or json)."`
 
-		LogPretty bool `name:"log-pretty" help:"Use pretty logging."`
+		Verbose       bool `name:"verbose" short:"v" help:"Use verbose logging."`
+		OmitTimestamp bool `name:"omit-timestamp" help:"Disable timestamps in logs."`
 	} `cmd:"" help:"Install or update a game."`
 }
 
@@ -52,28 +55,45 @@ func byteStr(n int64) string {
 	}
 }
 
-func Update(kongCtx *kong.Context) {
+func Update() {
+	ctx := patcher.SetVerbose(context.Background(), CLI.Update.Verbose)
+	if CLI.Update.OmitTimestamp {
+		log.SetFlags(0)
+	}
+
 	baseUrl, err := url.Parse(CLI.Update.BaseUrl)
-	kongCtx.FatalIfErrorf(err, "Base-url is not a valid URL.")
+	if err != nil {
+		log.Fatalf("base-url is not a valid URL: %s", err)
+	}
 
-	progressFunc := func(p patcher.Progress) {
-		phaseProgress := func(pp patcher.ProgressPhase) string {
-			var perc float64
-			if pp.Needed > 0 {
-				perc = float64(pp.Completed) / float64(pp.Needed) * 100
-			} else {
-				perc = 0
+	var progressFunc func(patcher.Progress)
+	if CLI.Update.ProgressMode == "json" {
+		progressFunc = func(p patcher.Progress) {
+			data, err := json.Marshal(p)
+			if err != nil {
+				log.Fatalf("Failed to serialize progress structure: %s", err)
 			}
-			if pp.Processing > 0 {
-				return fmt.Sprintf("%d/%d (%.1f%%, %d in progress)", pp.Completed, pp.Needed, perc, pp.Processing)
-			} else {
-				return fmt.Sprintf("%d/%d (%.1f%%)", pp.Completed, pp.Needed, perc)
-			}
+			println(string(data))
 		}
-		fmt.Printf("Verify: %s, Download: %s, Apply: %s, DL: %s/s, %s total\n",
-			phaseProgress(p.Verify), phaseProgress(p.Download), phaseProgress(p.Apply),
-			byteStr(p.DownloadSpeed), byteStr(p.DownloadTotalBytes))
-
+	} else {
+		progressFunc = func(p patcher.Progress) {
+			phaseProgress := func(pp patcher.ProgressPhase) string {
+				var perc float64
+				if pp.Needed > 0 {
+					perc = float64(pp.Completed) / float64(pp.Needed) * 100
+				} else {
+					perc = 0
+				}
+				if pp.Processing > 0 {
+					return fmt.Sprintf("%d/%d (%.1f%%, %d in progress)", pp.Completed, pp.Needed, perc, pp.Processing)
+				} else {
+					return fmt.Sprintf("%d/%d (%.1f%%)", pp.Completed, pp.Needed, perc)
+				}
+			}
+			fmt.Printf("Verify: %s, Download: %s, Apply: %s, DL: %s/s, %s total\n",
+				phaseProgress(p.Verify), phaseProgress(p.Download), phaseProgress(p.Apply),
+				byteStr(p.DownloadSpeed), byteStr(p.DownloadTotalBytes))
+		}
 	}
 
 	config := patcher.PatcherConfig{
@@ -86,37 +106,40 @@ func Update(kongCtx *kong.Context) {
 		XDeltaBinPath:   CLI.Update.XDeltaPath,
 		DownloadConfig: patcher.DownloadConfig{
 			MaxAttempts:              CLI.Update.DownloadMaxAttempts,
-			RetryBaseDelay:           time.Duration(CLI.Update.DownloadBaseDelay * float64(time.Second)),
+			RetryBaseDelay:           CLI.Update.DownloadBaseDelay,
 			RetryWaitIncrementFactor: CLI.Update.DownloadDelayFactor,
 			DownloadSpeedWindow:      CLI.Update.DownloadSpeedWindow,
+			DownloadRequestTimeout:   CLI.Update.DownloadRequestTimemout,
+			DownloadStallTimeout:     CLI.Update.DownloadStallTimeout,
 		},
 		ProgressInterval: time.Duration(CLI.Update.ProgressInterval) * time.Second,
 		ProgressFunc:     progressFunc,
 	}
 
-	ctx := context.Background()
 	ctx, stopNotify := signal.NotifyContext(ctx, os.Interrupt)
 	defer stopNotify()
-
-	if CLI.Update.LogPretty {
-		log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
-	}
 
 	var instructionsData []byte
 	if CLI.Update.Instructions == "-" {
 		// Instructions from stdin.
 		instructionsData, err = io.ReadAll(os.Stdin)
-		kongCtx.FatalIfErrorf(err, "Couldn't read instructions.json from stdin.", CLI.Update.Instructions)
+		if err != nil {
+			log.Fatalf("Couldn't read instructions.json from stdin: %s", err)
+		}
 	} else {
 		instructionsData, err = os.ReadFile(CLI.Update.Instructions)
-		kongCtx.FatalIfErrorf(err, "Couldn't read instructions.json file %q.", CLI.Update.Instructions)
+		if err != nil {
+			log.Fatalf("Couldn't read instructions.json file '%s': %s", CLI.Update.Instructions, err)
+		}
 	}
 	instructions, err := patcher.DecodeInstructions(instructionsData, CLI.Update.InstructionsHash)
-	kongCtx.FatalIfErrorf(err, "Couldn't decode instructions.json file %q.", CLI.Update.Instructions)
+	if err != nil {
+		log.Fatalf("Couldn't decode instructions.json file '%s': %s", CLI.Update.Instructions, err)
+	}
 
 	err = patcher.RunPatcher(ctx, instructions, config)
 	if err != nil && !errors.Is(err, context.Canceled) {
-		kongCtx.Fatalf("%s", err)
+		log.Fatalf("Patcher process failed: %s", err)
 	}
 }
 
@@ -124,7 +147,7 @@ func main() {
 	kongCtx := kong.Parse(&CLI)
 	switch kongCtx.Command() {
 	case "update <product> <base-url> <install-dir>":
-		Update(kongCtx)
+		Update()
 	default:
 		kongCtx.Fatalf("Unknown command %s", kongCtx.Command())
 	}
