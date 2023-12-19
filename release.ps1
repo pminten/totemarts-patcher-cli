@@ -6,5 +6,5 @@ param(
     [string] $GoLicensesPath = "go-licenses"
 )
 
-&"$GoLicensesPath" report .\cmd\tapatcher\ .\lib\patcher\ --template .\misc\license.tmpl > cmd/tapatcher/generated/LICENSES.md
+&"$GoLicensesPath" report .\cmd\tapatcher\ .\lib\patcher\ --template .\misc\license.tmpl > cmd/tapatcher/files/LICENSES.md
 go build ./cmd/tapatcher

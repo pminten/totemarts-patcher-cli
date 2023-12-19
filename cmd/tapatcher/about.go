@@ -6,7 +6,7 @@ import (
 
 // Use go-licenses (see release.ps1) to update this file after changing go.mod
 //
-//go:embed generated/LICENSES.md
+//go:embed files/LICENSES.md
 var licensesText string
 
 func printAbout() {
