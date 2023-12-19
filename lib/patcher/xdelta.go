@@ -54,15 +54,15 @@ func (x XDelta) ApplyPatch(
 	var cmd *exec.Cmd
 	var what string
 	if oldPath == nil {
-		// Decompress, source window <num>, force overwrite.
+		// Decompress, source window <num>, force overwrite, write to stdout.
 		// Source window number is copied from Vue/Electron launcher.
-		cmd = exec.CommandContext(ctx, x.binPath, "-d", "-B", "536870912", "-f", patchPath)
+		cmd = exec.CommandContext(ctx, x.binPath, "-d", "-B", "536870912", "-f", "-c", patchPath)
 		what = fmt.Sprintf("applying full patch '%s' to get '%s'", patchPath, newPath)
 	} else {
-		// Decompress, source window <num>, force overwrite, source file to copy from (oldPath).
-		cmd = exec.CommandContext(ctx, x.binPath, "-d", "-B", "536870912", "-f", "-s", *oldPath, patchPath)
+		// Decompress, source window <num>, force overwrite, write to stdout, source file to copy from (oldPath).
+		cmd = exec.CommandContext(ctx, x.binPath, "-d", "-B", "536870912", "-f", "-c", "-s", *oldPath, patchPath)
 		what = "delta patch"
-		what = fmt.Sprintf("applying full patch '%s' to '%s' to get '%s'", patchPath, *oldPath, newPath)
+		what = fmt.Sprintf("applying delta patch '%s' to '%s' to get '%s'", patchPath, *oldPath, newPath)
 	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
