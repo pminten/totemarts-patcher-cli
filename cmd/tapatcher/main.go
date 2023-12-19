@@ -44,6 +44,8 @@ var CLI struct {
 		OmitTimestamp bool   `name:"omit-timestamp" help:"Disable timestamps in logs."`
 		LogFile       string `name:"log-file" type:"path" help:"Where to store logs. Particularly useful with fancy progress mode as that hides logs."`
 	} `cmd:"" help:"Install or update a game."`
+	About struct {
+	} `cmd:"" help:"Show license info."`
 }
 
 func Update() {
@@ -148,6 +150,8 @@ func main() {
 	switch kongCtx.Command() {
 	case "update <product> <base-url> <install-dir>":
 		Update()
+	case "about":
+		printAbout()
 	default:
 		kongCtx.Fatalf("Unknown command %s", kongCtx.Command())
 	}
