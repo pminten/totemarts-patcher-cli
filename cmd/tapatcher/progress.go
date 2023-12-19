@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/cheggaaa/pb/v3"
 	"github.com/pminten/totemarts-patcher-cli/lib/patcher"
@@ -21,7 +22,7 @@ func byteStr(n int64) string {
 
 // makeFancyProgressFunc return a progress function for CLI progress bars and a function to clean up
 // the progress bars.
-func makeFancyProgressFunc() (func(patcher.Progress), func()) {
+func makeFancyProgressFunc(product string, installDir string) (func(patcher.Progress), func()) {
 	var widecounters pb.ElementFunc = func(state *pb.State, args ...string) string {
 		current := state.Current()
 		total := state.Total()
@@ -35,6 +36,7 @@ func makeFancyProgressFunc() (func(patcher.Progress), func()) {
 		return fmt.Sprintf("%5d / %5d", current, total)
 	}
 	pb.RegisterElement("widecounters", widecounters, false)
+
 	var wideperc pb.ElementFunc = func(state *pb.State, args ...string) string {
 		if state.Total() == 0 {
 			return "  0%"
@@ -43,6 +45,13 @@ func makeFancyProgressFunc() (func(patcher.Progress), func()) {
 		}
 	}
 	pb.RegisterElement("wideperc", wideperc, false)
+
+	var duration pb.ElementFunc = func(state *pb.State, args ...string) string {
+		d := state.Get("duration").(time.Duration)
+		return fmt.Sprintf("%01d:%02d:%02d", int(d.Hours()), int(d.Minutes())%60, int(d.Seconds())%60)
+	}
+	pb.RegisterElement("duration", duration, false)
+
 	var downloadstats pb.ElementFunc = func(state *pb.State, args ...string) string {
 		speed := state.Get("speed").(int64)
 		bytesTotal := state.Get("bytesTotal").(int64)
@@ -63,7 +72,7 @@ func makeFancyProgressFunc() (func(patcher.Progress), func()) {
 	for _, pbi := range phaseBarInfos {
 		bar := pb.New(0).
 			SetTemplateString(`{{with string . "prefix"}}{{.}} {{end}}{{widecounters . }} `+
-				`{{bar . "[" "=" ">" "_" "]" }} {{wideperc . }}{{with string . "suffix"}} {{.}}{{end}}`).
+				`{{bar . "[" "=" ">" "_" "]" }} {{wideperc . }} [{{duration .}}]`).
 			Set("prefix", pbi.t)
 		if err := bar.Err(); err != nil {
 			panic(fmt.Sprintf("Failed to set bar template: %s", err))
@@ -71,12 +80,11 @@ func makeFancyProgressFunc() (func(patcher.Progress), func()) {
 		phaseBars[pbi.ph] = bar
 	}
 
-	downloadBar := pb.New(0).
-		SetTemplateString(`{{with string . "prefix"}}{{.}} {{end}}{{widecounters . }} {{bar . "[" "=" ">" "_" "]" }} {{wideperc . }}{{with string . "suffix"}} {{.}}{{end}}`).
-		Set("prefix", "Download: ")
-	if err := downloadBar.Err(); err != nil {
-		panic(fmt.Sprintf("Failed to set bar template: %s", err))
-	}
+	titleBar := pb.New(0).
+		SetTemplateString(`Installing or updating game '{{string . "product"}}' at '{{string . "installDir"}}'`).
+		Set("product", product).
+		Set("installDir", installDir)
+
 	statsBar := pb.New(0).
 		SetTemplateString(`({{with string . "prefix"}}{{.}} {{end}}{{downloadstats .}})`).
 		Set("prefix", "Download speed: ").
@@ -86,7 +94,8 @@ func makeFancyProgressFunc() (func(patcher.Progress), func()) {
 		panic(fmt.Sprintf("Failed to set bar template: %s", err))
 	}
 
-	allBars := make([]*pb.ProgressBar, 0, len(phaseBars)+1)
+	allBars := make([]*pb.ProgressBar, 0, len(phaseBars)+2)
+	allBars = append(allBars, titleBar)
 	allBars = append(allBars, phaseBars...)
 	allBars = append(allBars, statsBar)
 	pool := pb.NewPool(allBars...)
@@ -100,6 +109,7 @@ func makeFancyProgressFunc() (func(patcher.Progress), func()) {
 			// Can store even for a finished bar, under the hood it's just atomics.
 			phb.SetCurrent(int64(ph.Completed))
 			phb.SetTotal(int64(ph.Needed))
+			phb.Set("duration", time.Duration(ph.Duration)*time.Second)
 			if ph.Done {
 				if ph.Needed == 0 {
 					// Fake the amounts to get 100% bar.
@@ -122,6 +132,14 @@ func makeFancyProgressFunc() (func(patcher.Progress), func()) {
 }
 
 func plainProgress(p patcher.Progress) {
+	phaseTime := func(pp patcher.ProgressPhase) string {
+		d := time.Duration(pp.Duration) * time.Second
+		if d < 1*time.Hour {
+			return fmt.Sprintf("%d:%02d", int(d.Minutes()), int(d.Seconds())%60)
+		} else {
+			return fmt.Sprintf("%d:%02d:%02d", int(d.Hours()), int(d.Minutes())%60, int(d.Seconds())%60)
+		}
+	}
 	phaseProgress := func(pp patcher.ProgressPhase) string {
 		var perc float64
 		if pp.Needed > 0 {
@@ -130,11 +148,12 @@ func plainProgress(p patcher.Progress) {
 			perc = 0
 		}
 		if pp.Processing > 0 {
-			return fmt.Sprintf("%d/%d (%.1f%%, %d in progress)", pp.Completed, pp.Needed, perc, pp.Processing)
+			return fmt.Sprintf("%d/%d (%.1f%%, %s, %d in progress)", pp.Completed, pp.Needed, perc,
+				phaseTime(pp), pp.Processing)
 		} else if pp.Done {
-			return fmt.Sprintf("%d/%d (100%%)", pp.Completed, pp.Needed)
+			return fmt.Sprintf("%d/%d (100%%, %s)", pp.Completed, pp.Needed, phaseTime(pp))
 		} else {
-			return fmt.Sprintf("%d/%d (%.1f%%)", pp.Completed, pp.Needed, perc)
+			return fmt.Sprintf("%d/%d (%.1f%%, %s)", pp.Completed, pp.Needed, perc, phaseTime(pp))
 		}
 	}
 	fmt.Printf("Verify: %s, Download: %s, Apply: %s, DL: %s/s, %s total\n",

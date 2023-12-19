@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"time"
 
 	"github.com/alecthomas/kong"
@@ -62,6 +63,11 @@ func Update() {
 		log.SetOutput(io.Discard) // Avoid messing with the terminal while progress is being printed.
 	}
 
+	absInstallDir, err := filepath.Abs(CLI.Update.InstallDir)
+	if err != nil {
+		log.Fatalf("install-dir is not a valid directory name: %s", err)
+	}
+
 	baseUrl, err := url.Parse(CLI.Update.BaseUrl)
 	if err != nil {
 		log.Fatalf("base-url is not a valid URL: %s", err)
@@ -78,7 +84,7 @@ func Update() {
 		}
 	} else if CLI.Update.ProgressMode == "fancy" {
 		var stopProgressFunc func()
-		progressFunc, stopProgressFunc = makeFancyProgressFunc()
+		progressFunc, stopProgressFunc = makeFancyProgressFunc(CLI.Update.Product, absInstallDir)
 		defer stopProgressFunc()
 	} else {
 		progressFunc = plainProgress
@@ -86,7 +92,7 @@ func Update() {
 
 	config := patcher.PatcherConfig{
 		BaseUrl:         baseUrl,
-		InstallDir:      CLI.Update.InstallDir,
+		InstallDir:      absInstallDir,
 		Product:         CLI.Update.Product,
 		VerifyWorkers:   CLI.Update.VerifyWorkers,
 		DownloadWorkers: CLI.Update.DownloadWorkers,

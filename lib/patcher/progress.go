@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 )
 
 type Phase int
@@ -54,6 +55,10 @@ type ProgressPhase struct {
 	// In the case of completed == 0 the phase might be not started yet
 	// or completed.
 	Done bool `json:"done"`
+	// How much time was spent in the stage at the last time progress was reported, in seconds.
+	Duration int `json:"duration"`
+	// When the phase was started (if started). Used to calculate how much time was spent in the stage.
+	startedAt *time.Time
 }
 
 // NewProgress creates a progress tracker.
@@ -61,11 +66,16 @@ func NewProgress() *ProgressTracker {
 	return &ProgressTracker{}
 }
 
-// Current returns a copy of the current progress.
+// Current returns a copy of the current progress with duration calculated correctly.
 func (p *ProgressTracker) Current() Progress {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return p.current
+	rv := p.current
+	now := time.Now()
+	rv.Verify.updateDurationToNow(now)
+	rv.Download.updateDurationToNow(now)
+	rv.Apply.updateDurationToNow(now)
+	return rv
 }
 
 // UpdateDownloadStats updates the download related statistics.
@@ -76,11 +86,23 @@ func (p *ProgressTracker) UpdateDownloadStats(stats DownloadStats) {
 	p.current.DownloadTotalBytes = stats.TotalBytes
 }
 
-// SetPhaseNeeded sets the needed value for a phase.
-func (p *ProgressTracker) SetPhaseNeeded(phase Phase, needed int) {
+// PhaseStarted sets the needed value for a phase and marks it as started.
+func (p *ProgressTracker) PhaseStarted(phase Phase, needed int) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.current.GetPhase(phase).Needed = needed
+	ph := p.current.GetPhase(phase)
+	ph.Needed = needed
+	t := time.Now()
+	ph.startedAt = &t
+}
+
+// PhaseDone marks a phase as finished.
+func (p *ProgressTracker) PhaseDone(phase Phase) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	ph := p.current.GetPhase(phase)
+	ph.Done = true
+	ph.Duration = int(time.Since(*ph.startedAt).Seconds())
 }
 
 // PhaseItemStarted increments the processing value in a phase.
@@ -104,14 +126,7 @@ func (p *ProgressTracker) PhaseItemDone(phase Phase, err error) {
 	} else if !errors.Is(err, context.Canceled) {
 		ph.Errors++
 	}
-	// Canceled is not completed but neither is it an error.
-}
-
-// PhaseDone marks a phase as finished.
-func (p *ProgressTracker) PhaseDone(phase Phase) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.current.GetPhase(phase).Done = true
+	// No else: canceled is not completed but neither is it an error.
 }
 
 // GetPhase returns a phase by number.
@@ -125,5 +140,12 @@ func (p *Progress) GetPhase(phase Phase) *ProgressPhase {
 		return &p.Apply
 	default:
 		panic(fmt.Sprintf("Unknown phase %d", phase))
+	}
+}
+
+// updateDuration updates the duration field of a phase if it is dependent on the currentTime.
+func (pp *ProgressPhase) updateDurationToNow(now time.Time) {
+	if pp.startedAt != nil && !pp.Done {
+		pp.Duration = int(now.Sub(*pp.startedAt).Seconds())
 	}
 }

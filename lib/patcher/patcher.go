@@ -71,7 +71,7 @@ func runVerifyPhase(
 	toMeasure := DetermineFilesToMeasure(instructions, manifest, existingFiles)
 	log.Printf("Computing checksums of %d files.", len(toMeasure))
 
-	progress.SetPhaseNeeded(PhaseVerify, len(toMeasure))
+	progress.PhaseStarted(PhaseVerify, len(toMeasure))
 	measuredFiles, err := DoInParallelWithResult[string, measuredFile](
 		ctx,
 		func(ctx context.Context, filename string) (mf measuredFile, retErr error) {
@@ -129,7 +129,7 @@ func runDownloadPhase(
 	}, ctx)
 
 	log.Printf("Downloading %d patch files.", len(toDownload))
-	progress.SetPhaseNeeded(PhaseDownload, len(toDownload))
+	progress.PhaseStarted(PhaseDownload, len(toDownload))
 	err := DoInParallel(
 		ctx,
 		func(ctx context.Context, di DownloadInstr) (retErr error) {
@@ -166,7 +166,7 @@ func runPatchPhase(
 	numWorkers int,
 ) error {
 	log.Printf("Patching %d files.", len(toUpdate))
-	progress.SetPhaseNeeded(PhaseApply, len(toUpdate))
+	progress.PhaseStarted(PhaseApply, len(toUpdate))
 	err := DoInParallel(
 		ctx,
 		func(ctx context.Context, ui UpdateInstr) (retErr error) {
