@@ -63,6 +63,18 @@ func runVerifyPhase(
 	progress *ProgressTracker,
 ) (*DeterminedActions, error) {
 	log.Printf("Scanning files in installation directory '%s'.", installDir)
+
+	// Unlikely, but I've observed some funky flip flopping when I accidentally triggered this.
+	// Granted, it was with a slightly messy manually edited instructions file but if it happens
+	// on a player's computer it'll be very annoying to debug and the check is cheap enough.
+	filesSeen := make(map[string]struct{})
+	for _, instr := range instructions {
+		if _, found := filesSeen[instr.Path]; found {
+			return nil, fmt.Errorf("got multiple entries for '%s' in instructions.json", instr.Path)
+		}
+		filesSeen[instr.Path] = struct{}{}
+	}
+
 	existingFiles, err := ScanFiles(installDir)
 	if err != nil {
 		return nil, err // ScanFiles adds enough context, no need for fmt.Errorf
