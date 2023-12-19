@@ -17,6 +17,7 @@ import (
 )
 
 var CLI struct {
+	// TODO: About command to print licenses of used libs.
 	Update struct {
 		Product          string `arg:"" name:"product" help:"Code of the game."`
 		BaseUrl          string `arg:"" name:"base-url" help:"URL of \"directory\" containing the instructions.json file."`
@@ -38,27 +39,27 @@ var CLI struct {
 		ProgressInterval int    `name:"progress-interval" default:"1" help:"How often to report progress."`
 		ProgressMode     string `name:"progress-mode" enum:"plain,fancy,json" default:"fancy" help:"How to report progress (plain, fancy or json)."`
 
-		Verbose       bool `name:"verbose" short:"v" help:"Use verbose logging."`
-		OmitTimestamp bool `name:"omit-timestamp" help:"Disable timestamps in logs."`
+		Verbose       bool   `name:"verbose" short:"v" help:"Use verbose logging."`
+		OmitTimestamp bool   `name:"omit-timestamp" help:"Disable timestamps in logs."`
+		LogFile       string `name:"log-file" type:"path" help:"Where to store logs. Particularly useful with fancy progress mode as that hides logs."`
 	} `cmd:"" help:"Install or update a game."`
-}
-
-func byteStr(n int64) string {
-	if n < 1<<10 {
-		return fmt.Sprintf("%d B", n)
-	} else if n < 1<<20 {
-		return fmt.Sprintf("%.2f KiB", float64(n)/(1<<10))
-	} else if n < 1<<30 {
-		return fmt.Sprintf("%.2f MiB", float64(n)/(1<<20))
-	} else {
-		return fmt.Sprintf("%.2f GiB", float64(n)/(1<<30))
-	}
 }
 
 func Update() {
 	ctx := patcher.SetVerbose(context.Background(), CLI.Update.Verbose)
+
 	if CLI.Update.OmitTimestamp {
 		log.SetFlags(0)
+	}
+	if CLI.Update.LogFile != "" {
+		logFile, err := os.Create(CLI.Update.LogFile)
+		if err != nil {
+			panic(fmt.Sprintf("Couldn't open log file '%s': %v", CLI.Update.LogFile, err))
+		}
+		log.SetOutput(logFile)
+	}
+	if CLI.Update.ProgressMode == "fancy" && CLI.Update.LogFile == "" {
+		log.SetOutput(io.Discard) // Avoid messing with the terminal while progress is being printed.
 	}
 
 	baseUrl, err := url.Parse(CLI.Update.BaseUrl)
@@ -75,25 +76,12 @@ func Update() {
 			}
 			println(string(data))
 		}
+	} else if CLI.Update.ProgressMode == "fancy" {
+		var stopProgressFunc func()
+		progressFunc, stopProgressFunc = makeFancyProgressFunc()
+		defer stopProgressFunc()
 	} else {
-		progressFunc = func(p patcher.Progress) {
-			phaseProgress := func(pp patcher.ProgressPhase) string {
-				var perc float64
-				if pp.Needed > 0 {
-					perc = float64(pp.Completed) / float64(pp.Needed) * 100
-				} else {
-					perc = 0
-				}
-				if pp.Processing > 0 {
-					return fmt.Sprintf("%d/%d (%.1f%%, %d in progress)", pp.Completed, pp.Needed, perc, pp.Processing)
-				} else {
-					return fmt.Sprintf("%d/%d (%.1f%%)", pp.Completed, pp.Needed, perc)
-				}
-			}
-			fmt.Printf("Verify: %s, Download: %s, Apply: %s, DL: %s/s, %s total\n",
-				phaseProgress(p.Verify), phaseProgress(p.Download), phaseProgress(p.Apply),
-				byteStr(p.DownloadSpeed), byteStr(p.DownloadTotalBytes))
-		}
+		progressFunc = plainProgress
 	}
 
 	config := patcher.PatcherConfig{
@@ -140,6 +128,12 @@ func Update() {
 	err = patcher.RunPatcher(ctx, instructions, config)
 	if err != nil && !errors.Is(err, context.Canceled) {
 		log.Fatalf("Patcher process failed: %s", err)
+	}
+
+	if CLI.Update.ProgressMode == "fancy" {
+		// Bit of a hack. The progress bar lib updates on a timer and if we exit straight after the final
+		// progress update that update didn't have time to propagate yet.
+		time.Sleep(time.Second)
 	}
 }
 

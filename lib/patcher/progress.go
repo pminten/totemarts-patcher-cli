@@ -50,6 +50,10 @@ type ProgressPhase struct {
 	Errors int `json:"errors"`
 	// How many items should be processed.
 	Needed int `json:"needed"`
+	// Whether the phase is completed.
+	// In the case of completed == 0 the phase might be not started yet
+	// or completed.
+	Done bool `json:"done"`
 }
 
 // NewProgress creates a progress tracker.
@@ -76,32 +80,14 @@ func (p *ProgressTracker) UpdateDownloadStats(stats DownloadStats) {
 func (p *ProgressTracker) SetPhaseNeeded(phase Phase, needed int) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	switch phase {
-	case PhaseVerify:
-		p.current.Verify.Needed = needed
-	case PhaseDownload:
-		p.current.Download.Needed = needed
-	case PhaseApply:
-		p.current.Apply.Needed = needed
-	default:
-		panic(fmt.Sprintf("Unknown phase %d", phase))
-	}
+	p.current.GetPhase(phase).Needed = needed
 }
 
 // PhaseItemStarted increments the processing value in a phase.
 func (p *ProgressTracker) PhaseItemStarted(phase Phase) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	switch phase {
-	case PhaseVerify:
-		p.current.Verify.Processing++
-	case PhaseDownload:
-		p.current.Download.Processing++
-	case PhaseApply:
-		p.current.Apply.Processing++
-	default:
-		panic(fmt.Sprintf("Unknown phase %d", phase))
-	}
+	p.current.GetPhase(phase).Processing++
 }
 
 // PhaseItemDone increments the errors or completed value in a phase
@@ -109,24 +95,35 @@ func (p *ProgressTracker) PhaseItemStarted(phase Phase) {
 func (p *ProgressTracker) PhaseItemDone(phase Phase, err error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	var ph *ProgressPhase
-	switch phase {
-	case PhaseVerify:
-		ph = &p.current.Verify
-	case PhaseDownload:
-		ph = &p.current.Download
-	case PhaseApply:
-		ph = &p.current.Apply
-	default:
-		panic(fmt.Sprintf("Unknown phase %d", phase))
-	}
+	ph := p.current.GetPhase(phase)
 	// No protection against going below 0, but it should be obvious
 	// to the user and is really just a visual bug.
 	ph.Processing--
 	if err == nil {
 		ph.Completed++
 	} else if !errors.Is(err, context.Canceled) {
-		ph.Errors--
+		ph.Errors++
 	}
 	// Canceled is not completed but neither is it an error.
+}
+
+// PhaseDone marks a phase as finished.
+func (p *ProgressTracker) PhaseDone(phase Phase) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.current.GetPhase(phase).Done = true
+}
+
+// GetPhase returns a phase by number.
+func (p *Progress) GetPhase(phase Phase) *ProgressPhase {
+	switch phase {
+	case PhaseVerify:
+		return &p.Verify
+	case PhaseDownload:
+		return &p.Download
+	case PhaseApply:
+		return &p.Apply
+	default:
+		panic(fmt.Sprintf("Unknown phase %d", phase))
+	}
 }

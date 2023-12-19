@@ -107,6 +107,7 @@ func runVerifyPhase(
 		manifest.Add(mf.filename, mf.modTime, mf.checksum)
 	}
 	actions := DetermineActions(instructions, manifest, existingFiles, checksums)
+	progress.PhaseDone(PhaseVerify)
 	return &actions, nil
 }
 
@@ -150,6 +151,7 @@ func runDownloadPhase(
 	if err != nil {
 		return err
 	}
+	progress.PhaseDone(PhaseDownload)
 	return nil
 }
 
@@ -219,10 +221,16 @@ func runPatchPhase(
 		}
 	}
 
+	progress.PhaseDone(PhaseApply)
 	return nil
 }
 
 func RunPatcher(ctx context.Context, instructions []Instruction, config PatcherConfig) error {
+	// This dance ensures one progress message is sent out in the program even if it's immediately done.
+	ctx, cancelCtx := context.WithCancel(ctx)
+	progressDone := make(chan struct{})
+	defer func() { cancelCtx(); <-progressDone }()
+
 	xdelta, err := NewXDelta(config.XDeltaBinPath)
 	if err != nil {
 		return err
@@ -252,6 +260,7 @@ func RunPatcher(ctx context.Context, instructions []Instruction, config PatcherC
 			case <-ctx.Done():
 				// Report progress one last time, usually that's the "all completed" progress.
 				config.ProgressFunc(progress.Current())
+				close(progressDone)
 				return
 			}
 		}
