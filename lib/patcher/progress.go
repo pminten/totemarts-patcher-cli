@@ -129,6 +129,14 @@ func (p *ProgressTracker) PhaseItemDone(phase Phase, err error) {
 	// No else: canceled is not completed but neither is it an error.
 }
 
+// PhaseItemsSkipped increases the completed count for a phase without
+// putting items in processing.
+func (p *ProgressTracker) PhaseItemsSkipped(phase Phase, count int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.current.GetPhase(phase).Completed += count
+}
+
 // GetPhase returns a phase by number.
 func (p *Progress) GetPhase(phase Phase) *ProgressPhase {
 	switch phase {

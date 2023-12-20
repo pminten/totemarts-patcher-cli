@@ -84,7 +84,8 @@ func runVerifyPhase(
 	log.Printf("Computing checksums of %d files, %d checksums already known from manifest.",
 		len(toMeasure), len(manifestChecksums))
 
-	progress.PhaseStarted(PhaseVerify, len(toMeasure))
+	progress.PhaseStarted(PhaseVerify, len(toMeasure)+len(manifestChecksums))
+	progress.PhaseItemsSkipped(PhaseVerify, len(manifestChecksums))
 	measuredFiles, err := DoInParallelWithResult[string, measuredFile](
 		ctx,
 		func(ctx context.Context, filename string) (mf measuredFile, retErr error) {
