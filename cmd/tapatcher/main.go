@@ -85,6 +85,7 @@ func update() {
 
 		Verbose:       CLI.Update.Verbose,
 		OmitTimestamp: CLI.Update.OmitTimestamp,
+		LogFile:       CLI.Update.LogFile,
 	}
 
 	setupLogging(&commonOpts)
@@ -127,6 +128,7 @@ func updateFromInstructions() {
 
 		Verbose:       CLI.UpdateFromInstructions.Verbose,
 		OmitTimestamp: CLI.UpdateFromInstructions.OmitTimestamp,
+		LogFile:       CLI.UpdateFromInstructions.LogFile,
 	}
 
 	setupLogging(&commonOpts)
