@@ -239,7 +239,10 @@ func doUpdate(
 	if commonOpts.ProgressMode == "fancy" {
 		// Bit of a hack. The progress bar lib updates on a timer and if we exit straight after the final
 		// progress update that update didn't have time to propagate yet.
-		time.Sleep(time.Second)
+		select {
+		case <-time.After(time.Second):
+		case <-ctx.Done():
+		}
 	}
 }
 
