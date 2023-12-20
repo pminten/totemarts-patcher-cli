@@ -48,11 +48,7 @@ type Instruction struct {
 }
 
 // DecodeInstructions decodes instructions.json and runs some basic sanity checks.
-func DecodeInstructions(jsonData []byte, instructionsHash string) ([]Instruction, error) {
-	checksum := HashBytes(jsonData)
-	if !strings.EqualFold(checksum, instructionsHash) {
-		return nil, fmt.Errorf("instructions.json hash mismatch, expected %s got %s", instructionsHash, checksum)
-	}
+func DecodeInstructions(jsonData []byte) ([]Instruction, error) {
 	var rawInstructions []rawInstruction
 	if err := json.Unmarshal(jsonData, &rawInstructions); err != nil {
 		return nil, fmt.Errorf("instructions.json couldn't be decoded: %s", err)

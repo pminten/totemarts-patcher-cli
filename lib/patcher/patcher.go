@@ -238,11 +238,6 @@ func runPatchPhase(
 }
 
 func RunPatcher(ctx context.Context, instructions []Instruction, config PatcherConfig) error {
-	// This dance ensures one progress message is sent out in the program even if it's immediately done.
-	ctx, cancelCtx := context.WithCancel(ctx)
-	progressDone := make(chan struct{})
-	defer func() { cancelCtx(); <-progressDone }()
-
 	xdelta, err := NewXDelta(config.XDeltaBinPath)
 	if err != nil {
 		return err
@@ -260,6 +255,13 @@ func RunPatcher(ctx context.Context, instructions []Instruction, config PatcherC
 	if err = os.MkdirAll(patchApplyDir, 0755); err != nil {
 		return fmt.Errorf("couldn't create patch and patch apply directories '%s': %w", patchApplyDir, err)
 	}
+
+	// This dance ensures one progress message is sent out in the program even if it's immediately done.
+	// Don't move this code up above an error return. If the progress goroutine hasn't started yet it will
+	// deadlock on return.
+	ctx, cancelCtx := context.WithCancel(ctx)
+	progressDone := make(chan struct{})
+	defer func() { cancelCtx(); <-progressDone }()
 
 	progress := NewProgress()
 	go func() {

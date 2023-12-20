@@ -22,7 +22,7 @@ func byteStr(n int64) string {
 
 // makeFancyProgressFunc return a progress function for CLI progress bars and a function to clean up
 // the progress bars.
-func makeFancyProgressFunc(product string, installDir string) (func(patcher.Progress), func()) {
+func makeFancyProgressFunc(product string, installDir string, gameVersion *string) (func(patcher.Progress), func()) {
 	var widecounters pb.ElementFunc = func(state *pb.State, args ...string) string {
 		current := state.Current()
 		total := state.Total()
@@ -80,10 +80,18 @@ func makeFancyProgressFunc(product string, installDir string) (func(patcher.Prog
 		phaseBars[pbi.ph] = bar
 	}
 
+	titleTemplate := `Installing or updating game '{{string . "product"}}' `
+	if gameVersion != nil {
+		titleTemplate += `to '{{string . "gameVersion"}}' `
+	}
+	titleTemplate += `at '{{string . "installDir"}}'`
 	titleBar := pb.New(0).
-		SetTemplateString(`Installing or updating game '{{string . "product"}}' at '{{string . "installDir"}}'`).
+		SetTemplateString(titleTemplate).
 		Set("product", product).
 		Set("installDir", installDir)
+	if gameVersion != nil {
+		titleBar.Set("gameVersion", *gameVersion)
+	}
 
 	statsBar := pb.New(0).
 		SetTemplateString(`({{with string . "prefix"}}{{.}} {{end}}{{downloadstats .}})`).

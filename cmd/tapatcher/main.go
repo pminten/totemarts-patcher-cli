@@ -17,66 +17,180 @@ import (
 	"github.com/pminten/totemarts-patcher-cli/lib/patcher"
 )
 
+type CommonUpdateOpts struct {
+	VerifyWorkers   int    `name:"verify-workers" help:"Number of current file verifications."`
+	DownloadWorkers int    `name:"download-workers" help:"Number of current patch downloads."`
+	ApplyWorkers    int    `name:"apply-workers" help:"Number of current patching processes."`
+	XDeltaPath      string `name:"xdelta" default:"xdelta3" help:"Path to xdelta3 binary. If no directory name will also look for this in PATH and the current directory."`
+
+	DownloadMaxAttempts     int           `name:"download-max-attempts" default:"5" help:"How many times to try to download a file."`
+	DownloadBaseDelay       time.Duration `name:"download-base-delay" default:"1s" help:"How many seconds to wait between download retries at first."`
+	DownloadDelayFactor     float64       `name:"download-delay-factor" default:"1.5" help:"How much to multiply delay between download retries after each retry."`
+	DownloadSpeedWindow     int           `name:"download-speed-window" default:"5" help:"How many seconds to average download speed over."`
+	DownloadRequestTimemout time.Duration `name:"download-request-timeout" default:"30s" help:"How many seconds to allow before receiving the start of a download response."`
+	DownloadStallTimeout    time.Duration `name:"download-stall-timeout" default:"30s" help:"How many seconds to allow between receiving any data in a download."`
+
+	ProgressInterval int    `name:"progress-interval" default:"1" help:"How often to report progress."`
+	ProgressMode     string `name:"progress-mode" enum:"plain,fancy,json" default:"fancy" help:"How to report progress (plain, fancy or json)."`
+
+	Verbose       bool   `name:"verbose" short:"v" help:"Use verbose logging."`
+	OmitTimestamp bool   `name:"omit-timestamp" help:"Disable timestamps in logs."`
+	LogFile       string `name:"log-file" type:"path" help:"Where to store logs. Particularly useful with fancy progress mode as that hides logs."`
+}
+
 var CLI struct {
-	// TODO: About command to print licenses of used libs.
 	Update struct {
-		Product          string `arg:"" name:"product" help:"Code of the game."`
-		BaseUrl          string `arg:"" name:"base-url" help:"URL of \"directory\" containing the instructions.json file."`
-		InstallDir       string `arg:"" name:"install-dir" help:"Directory where the game should be."`
-		Instructions     string `name:"instructions" short:"I" default:"-" type:"existingfile" help:"Path of instructions.json file or '-' to read them from stdin."`
-		InstructionsHash string `name:"instructions-hash" short:"H" help:"SHA256 checksum of the instructions file."`
-		VerifyWorkers    int    `name:"verify-workers" help:"Number of current file verifications."`
-		DownloadWorkers  int    `name:"download-workers" help:"Number of current patch downloads."`
-		ApplyWorkers     int    `name:"apply-workers" help:"Number of current patching processes."`
-		XDeltaPath       string `name:"xdelta" default:"xdelta3" help:"Path to xdelta3 binary. If no directory name will also look for this in PATH and the current directory."`
+		Product    string `arg:"" name:"product" help:"Code of the game."`
+		InstallDir string `arg:"" name:"install-dir" help:"Directory where the game should be."`
 
-		DownloadMaxAttempts     int           `name:"download-max-attempts" default:"5" help:"How many times to try to download a file."`
-		DownloadBaseDelay       time.Duration `name:"download-base-delay" default:"1s" help:"How many seconds to wait between download retries at first."`
-		DownloadDelayFactor     float64       `name:"download-delay-factor" default:"1.5" help:"How much to multiply delay between download retries after each retry."`
-		DownloadSpeedWindow     int           `name:"download-speed-window" default:"5" help:"How many seconds to average download speed over."`
-		DownloadRequestTimemout time.Duration `name:"download-request-timeout" default:"30s" help:"How many seconds to allow before receiving the start of a download response."`
-		DownloadStallTimeout    time.Duration `name:"download-stall-timeout" default:"30s" help:"How many seconds to allow between receiving any data in a download."`
+		ProductsUrl string `name:"products-url" short:"U" default:"https://launcher.totemarts.services/products.json" help:"Location of the products.json file."`
 
-		ProgressInterval int    `name:"progress-interval" default:"1" help:"How often to report progress."`
-		ProgressMode     string `name:"progress-mode" enum:"plain,fancy,json" default:"fancy" help:"How to report progress (plain, fancy or json)."`
-
-		Verbose       bool   `name:"verbose" short:"v" help:"Use verbose logging."`
-		OmitTimestamp bool   `name:"omit-timestamp" help:"Disable timestamps in logs."`
-		LogFile       string `name:"log-file" type:"path" help:"Where to store logs. Particularly useful with fancy progress mode as that hides logs."`
+		CommonUpdateOpts
 	} `cmd:"" help:"Install or update a game."`
+	UpdateFromInstructions struct {
+		Product    string `arg:"" name:"product" help:"Code of the game."`
+		InstallDir string `arg:"" name:"install-dir" help:"Directory where the game should be."`
+		BaseUrl    string `arg:"" name:"base-url" help:"URL of \"directory\" containing the instructions.json file."`
+
+		Instructions string `name:"instructions" short:"I" type:"existingfile" help:"Path of instructions.json file, can be used to skip the download of the instru."`
+
+		CommonUpdateOpts
+	} `cmd:"" help:"Install or update a game using an already downloaded instructions.json file."`
 	About struct {
 	} `cmd:"" help:"Show license info."`
 }
 
-func Update() {
-	ctx := patcher.SetVerbose(context.Background(), CLI.Update.Verbose)
+func update() {
+	product := CLI.Update.Product
+	installDir := CLI.Update.InstallDir
+	productsUrlStr := CLI.Update.ProductsUrl
 
-	if CLI.Update.OmitTimestamp {
-		log.SetFlags(0)
-	}
-	if CLI.Update.LogFile != "" {
-		logFile, err := os.Create(CLI.Update.LogFile)
-		if err != nil {
-			panic(fmt.Sprintf("Couldn't open log file '%s': %v", CLI.Update.LogFile, err))
-		}
-		log.SetOutput(logFile)
-	}
-	if CLI.Update.ProgressMode == "fancy" && CLI.Update.LogFile == "" {
-		log.SetOutput(io.Discard) // Avoid messing with the terminal while progress is being printed.
+	// Yes, this looks silly. It's the least ugly approach I've found for sharing arguments between
+	// some but not all of the subcommands.
+	commonOpts := CommonUpdateOpts{
+		VerifyWorkers:   CLI.Update.VerifyWorkers,
+		DownloadWorkers: CLI.Update.DownloadWorkers,
+		ApplyWorkers:    CLI.Update.ApplyWorkers,
+		XDeltaPath:      CLI.Update.XDeltaPath,
+
+		DownloadMaxAttempts:     CLI.Update.DownloadMaxAttempts,
+		DownloadBaseDelay:       CLI.Update.DownloadBaseDelay,
+		DownloadDelayFactor:     CLI.Update.DownloadDelayFactor,
+		DownloadSpeedWindow:     CLI.Update.DownloadSpeedWindow,
+		DownloadRequestTimemout: CLI.Update.DownloadRequestTimemout,
+		DownloadStallTimeout:    CLI.Update.DownloadStallTimeout,
+
+		ProgressInterval: CLI.Update.ProgressInterval,
+		ProgressMode:     CLI.Update.ProgressMode,
+
+		Verbose:       CLI.Update.Verbose,
+		OmitTimestamp: CLI.Update.OmitTimestamp,
 	}
 
-	absInstallDir, err := filepath.Abs(CLI.Update.InstallDir)
+	setupLogging(&commonOpts)
+
+	productsUrl, err := url.Parse(productsUrlStr)
 	if err != nil {
-		log.Fatalf("install-dir is not a valid directory name: %s", err)
+		log.Fatalf("products-url is not a valid URL: %s", err)
 	}
 
-	baseUrl, err := url.Parse(CLI.Update.BaseUrl)
+	resolved, err := patcher.ResolveInstructions(productsUrl, product)
+	if err != nil {
+		log.Fatalf("failed to resolve instructions.json: %s", err)
+	}
+
+	doUpdate(&commonOpts, product, installDir, resolved.BaseUrl, resolved.Instructions, &resolved.VersionName)
+}
+
+func updateFromInstructions() {
+	product := CLI.UpdateFromInstructions.Product
+	installDir := CLI.UpdateFromInstructions.InstallDir
+	baseUrlStr := CLI.UpdateFromInstructions.BaseUrl
+	instructionsPath := CLI.UpdateFromInstructions.Instructions
+	var gameVersion *string = nil
+
+	commonOpts := CommonUpdateOpts{
+		VerifyWorkers:   CLI.UpdateFromInstructions.VerifyWorkers,
+		DownloadWorkers: CLI.UpdateFromInstructions.DownloadWorkers,
+		ApplyWorkers:    CLI.UpdateFromInstructions.ApplyWorkers,
+		XDeltaPath:      CLI.UpdateFromInstructions.XDeltaPath,
+
+		DownloadMaxAttempts:     CLI.UpdateFromInstructions.DownloadMaxAttempts,
+		DownloadBaseDelay:       CLI.UpdateFromInstructions.DownloadBaseDelay,
+		DownloadDelayFactor:     CLI.UpdateFromInstructions.DownloadDelayFactor,
+		DownloadSpeedWindow:     CLI.UpdateFromInstructions.DownloadSpeedWindow,
+		DownloadRequestTimemout: CLI.UpdateFromInstructions.DownloadRequestTimemout,
+		DownloadStallTimeout:    CLI.UpdateFromInstructions.DownloadStallTimeout,
+
+		ProgressInterval: CLI.UpdateFromInstructions.ProgressInterval,
+		ProgressMode:     CLI.UpdateFromInstructions.ProgressMode,
+
+		Verbose:       CLI.UpdateFromInstructions.Verbose,
+		OmitTimestamp: CLI.UpdateFromInstructions.OmitTimestamp,
+	}
+
+	setupLogging(&commonOpts)
+
+	baseUrl, err := url.Parse(baseUrlStr)
 	if err != nil {
 		log.Fatalf("base-url is not a valid URL: %s", err)
 	}
 
+	var instructionsData []byte
+	if instructionsPath == "-" {
+		// Instructions from stdin.
+		instructionsData, err = io.ReadAll(os.Stdin)
+		if err != nil {
+			log.Fatalf("Couldn't read instructions.json from stdin: %s", err)
+		}
+	} else {
+		instructionsData, err = os.ReadFile(instructionsPath)
+		if err != nil {
+			log.Fatalf("Couldn't read instructions.json file '%s': %s", instructionsPath, err)
+		}
+	}
+	instructions, err := patcher.DecodeInstructions(instructionsData)
+	if err != nil {
+		log.Fatalf("Couldn't decode instructions.json file '%s': %s", instructionsPath, err)
+	}
+
+	doUpdate(&commonOpts, product, installDir, baseUrl, instructions, gameVersion)
+}
+
+func setupLogging(commonOpts *CommonUpdateOpts) {
+	if commonOpts.OmitTimestamp {
+		log.SetFlags(0)
+	}
+	if commonOpts.LogFile != "" {
+		logFile, err := os.Create(commonOpts.LogFile)
+		if err != nil {
+			panic(fmt.Sprintf("Couldn't open log file '%s': %v", commonOpts.LogFile, err))
+		}
+		log.SetOutput(logFile)
+	}
+	if commonOpts.ProgressMode == "fancy" && commonOpts.LogFile == "" {
+		log.SetOutput(io.Discard) // Avoid messing with the terminal while progress is being printed.
+	}
+
+}
+
+func doUpdate(
+	commonOpts *CommonUpdateOpts,
+	product string,
+	installDir string,
+	baseUrl *url.URL,
+	instructions []patcher.Instruction,
+	gameVersion *string,
+) {
+	ctx := patcher.SetVerbose(context.Background(), commonOpts.Verbose)
+
+	absInstallDir, err := filepath.Abs(installDir)
+	if err != nil {
+		log.Fatalf("install-dir is not a valid directory name: %s", err)
+	}
+
 	var progressFunc func(patcher.Progress)
-	if CLI.Update.ProgressMode == "json" {
+	if commonOpts.ProgressMode == "json" {
 		progressFunc = func(p patcher.Progress) {
 			data, err := json.Marshal(p)
 			if err != nil {
@@ -84,9 +198,9 @@ func Update() {
 			}
 			println(string(data))
 		}
-	} else if CLI.Update.ProgressMode == "fancy" {
+	} else if commonOpts.ProgressMode == "fancy" {
 		var stopProgressFunc func()
-		progressFunc, stopProgressFunc = makeFancyProgressFunc(CLI.Update.Product, absInstallDir)
+		progressFunc, stopProgressFunc = makeFancyProgressFunc(product, absInstallDir, gameVersion)
 		defer stopProgressFunc()
 	} else {
 		progressFunc = plainProgress
@@ -95,50 +209,32 @@ func Update() {
 	config := patcher.PatcherConfig{
 		BaseUrl:         baseUrl,
 		InstallDir:      absInstallDir,
-		Product:         CLI.Update.Product,
-		VerifyWorkers:   CLI.Update.VerifyWorkers,
-		DownloadWorkers: CLI.Update.DownloadWorkers,
-		ApplyWorkers:    CLI.Update.ApplyWorkers,
-		XDeltaBinPath:   CLI.Update.XDeltaPath,
+		Product:         product,
+		VerifyWorkers:   commonOpts.VerifyWorkers,
+		DownloadWorkers: commonOpts.DownloadWorkers,
+		ApplyWorkers:    commonOpts.ApplyWorkers,
+		XDeltaBinPath:   commonOpts.XDeltaPath,
 		DownloadConfig: patcher.DownloadConfig{
-			MaxAttempts:              CLI.Update.DownloadMaxAttempts,
-			RetryBaseDelay:           CLI.Update.DownloadBaseDelay,
-			RetryWaitIncrementFactor: CLI.Update.DownloadDelayFactor,
-			DownloadSpeedWindow:      CLI.Update.DownloadSpeedWindow,
-			DownloadRequestTimeout:   CLI.Update.DownloadRequestTimemout,
-			DownloadStallTimeout:     CLI.Update.DownloadStallTimeout,
+			MaxAttempts:              commonOpts.DownloadMaxAttempts,
+			RetryBaseDelay:           commonOpts.DownloadBaseDelay,
+			RetryWaitIncrementFactor: commonOpts.DownloadDelayFactor,
+			DownloadSpeedWindow:      commonOpts.DownloadSpeedWindow,
+			DownloadRequestTimeout:   commonOpts.DownloadRequestTimemout,
+			DownloadStallTimeout:     commonOpts.DownloadStallTimeout,
 		},
-		ProgressInterval: time.Duration(CLI.Update.ProgressInterval) * time.Second,
+		ProgressInterval: time.Duration(commonOpts.ProgressInterval) * time.Second,
 		ProgressFunc:     progressFunc,
 	}
 
 	ctx, stopNotify := signal.NotifyContext(ctx, os.Interrupt)
 	defer stopNotify()
 
-	var instructionsData []byte
-	if CLI.Update.Instructions == "-" {
-		// Instructions from stdin.
-		instructionsData, err = io.ReadAll(os.Stdin)
-		if err != nil {
-			log.Fatalf("Couldn't read instructions.json from stdin: %s", err)
-		}
-	} else {
-		instructionsData, err = os.ReadFile(CLI.Update.Instructions)
-		if err != nil {
-			log.Fatalf("Couldn't read instructions.json file '%s': %s", CLI.Update.Instructions, err)
-		}
-	}
-	instructions, err := patcher.DecodeInstructions(instructionsData, CLI.Update.InstructionsHash)
-	if err != nil {
-		log.Fatalf("Couldn't decode instructions.json file '%s': %s", CLI.Update.Instructions, err)
-	}
-
 	err = patcher.RunPatcher(ctx, instructions, config)
 	if err != nil && !errors.Is(err, context.Canceled) {
 		log.Fatalf("Patcher process failed: %s", err)
 	}
 
-	if CLI.Update.ProgressMode == "fancy" {
+	if commonOpts.ProgressMode == "fancy" {
 		// Bit of a hack. The progress bar lib updates on a timer and if we exit straight after the final
 		// progress update that update didn't have time to propagate yet.
 		time.Sleep(time.Second)
@@ -148,8 +244,10 @@ func Update() {
 func main() {
 	kongCtx := kong.Parse(&CLI)
 	switch kongCtx.Command() {
-	case "update <product> <base-url> <install-dir>":
-		Update()
+	case "update <product> <install-dir>":
+		update()
+	case "update-from-instructions <product> <install-dir> <base-url>":
+		updateFromInstructions()
 	case "about":
 		printAbout()
 	default:
