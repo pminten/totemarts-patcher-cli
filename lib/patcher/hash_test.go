@@ -20,3 +20,10 @@ func TestHashReaderAndHashBytes(t *testing.T) {
 	expected := HashBytes(data)
 	require.EqualValues(t, expected, actual)
 }
+
+func TestHashEqual(t *testing.T) {
+	// Just case insensitive compare.
+	require.True(t, HashEqual("a", "a"))
+	require.True(t, HashEqual("a", "A"))
+	require.False(t, HashEqual("a", "b"))
+}

@@ -12,7 +12,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"strings"
 	"sync"
 	"time"
 )
@@ -173,7 +172,7 @@ func (d *Downloader) DownloadFile(
 		defer existingFile.Close()
 		// Checking for expected size avoids reading the whole file if there's no way it can match.
 		if fileInfo, err := existingFile.Stat(); err == nil && fileInfo.Size() == expectedSize {
-			if cs, err := HashReader(ctx, existingFile); err == nil && strings.EqualFold(cs, expectedChecksum) {
+			if cs, err := HashReader(ctx, existingFile); err == nil && HashEqual(cs, expectedChecksum) {
 				log.Printf("Patch file '%s' is already present, skipping download.", filename)
 				return nil
 			}
@@ -300,7 +299,7 @@ func (d *Downloader) doDownloadFile(
 	observer.mu.Lock()
 	defer observer.mu.Unlock()
 	actualChecksum := hex.EncodeToString(observer.hash.Sum(nil))
-	if !strings.EqualFold(expectedChecksum, actualChecksum) {
+	if !HashEqual(expectedChecksum, actualChecksum) {
 		return fmt.Errorf("downloaded file has invalid checksum for '%s' downloaded to '%s', expected %s, got %s",
 			downloadUrl, filename, expectedChecksum, actualChecksum)
 	}

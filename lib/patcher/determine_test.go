@@ -33,8 +33,9 @@ func TestDetermineFilesToMeasureFoundInManifest(t *testing.T) {
 	infos := map[string]BasicFileInfo{
 		filename1: {ModTime: date1},
 	}
-	toMeasure := DetermineFilesToMeasure(instructions, manifest, infos)
+	toMeasure, checksums := DetermineFilesToMeasure(instructions, manifest, infos)
 	require.Empty(t, toMeasure)
+	require.EqualValues(t, map[string]string{filename1: "def"}, checksums)
 }
 
 func TestDetermineFilesToMeasureNotFoundInManifest(t *testing.T) {
@@ -52,8 +53,9 @@ func TestDetermineFilesToMeasureNotFoundInManifest(t *testing.T) {
 	infos := map[string]BasicFileInfo{
 		filename1: {ModTime: date1},
 	}
-	toMeasure := DetermineFilesToMeasure(instructions, manifest, infos)
+	toMeasure, checksums := DetermineFilesToMeasure(instructions, manifest, infos)
 	require.EqualValues(t, []string{filename1}, toMeasure)
+	require.Empty(t, checksums)
 }
 
 func TestDetermineFilesToMeasureFoundInManifestWithWrongTimestamp(t *testing.T) {
@@ -71,8 +73,9 @@ func TestDetermineFilesToMeasureFoundInManifestWithWrongTimestamp(t *testing.T) 
 	infos := map[string]BasicFileInfo{
 		filename1: {ModTime: date2},
 	}
-	toMeasure := DetermineFilesToMeasure(instructions, manifest, infos)
+	toMeasure, checksums := DetermineFilesToMeasure(instructions, manifest, infos)
 	require.EqualValues(t, []string{filename1}, toMeasure)
+	require.Empty(t, checksums)
 }
 
 func TestDetermineFilesToMeasureFoundInManifestWithWrongChecksum(t *testing.T) {
@@ -90,8 +93,9 @@ func TestDetermineFilesToMeasureFoundInManifestWithWrongChecksum(t *testing.T) {
 	infos := map[string]BasicFileInfo{
 		filename1: {ModTime: date1},
 	}
-	toMeasure := DetermineFilesToMeasure(instructions, manifest, infos)
-	require.EqualValues(t, []string{filename1}, toMeasure)
+	toMeasure, checksums := DetermineFilesToMeasure(instructions, manifest, infos)
+	require.Empty(t, toMeasure)
+	require.EqualValues(t, map[string]string{filename1: "efg"}, checksums)
 }
 
 func TestDetermineFilesToMeasureNotFoundInInfos(t *testing.T) {
@@ -109,11 +113,12 @@ func TestDetermineFilesToMeasureNotFoundInInfos(t *testing.T) {
 	infos := map[string]BasicFileInfo{
 		filename2: {ModTime: date1},
 	}
-	toMeasure := DetermineFilesToMeasure(instructions, manifest, infos)
+	toMeasure, checksums := DetermineFilesToMeasure(instructions, manifest, infos)
 	// If the file is not in infos it doesn't exist yet, so it doesn't need
 	// to be verified. It will however need to be downloaded but that's
 	// not something this function determines.
 	require.Empty(t, toMeasure)
+	require.Empty(t, checksums)
 }
 
 func TestDetermineFilesOnlyDelete(t *testing.T) {
@@ -131,13 +136,12 @@ func TestDetermineFilesOnlyDelete(t *testing.T) {
 	infos := map[string]BasicFileInfo{
 		filename1: {ModTime: date1},
 	}
-	toMeasure := DetermineFilesToMeasure(instructions, manifest, infos)
+	toMeasure, checksums := DetermineFilesToMeasure(instructions, manifest, infos)
 	require.Empty(t, toMeasure)
+	require.Empty(t, checksums)
 }
 
 func TestDetermineActionsOnlyDelete(t *testing.T) {
-	// Use two elements to cause the callback to a the sort of toDelete
-	// to be considered visited in coverage.
 	instructions := []Instruction{
 		{
 			Path:            filename1,
@@ -163,13 +167,13 @@ func TestDetermineActionsOnlyDelete(t *testing.T) {
 	manifest.Add(filename2, date2, "wvu")
 	infos := map[string]BasicFileInfo{
 		filename1: {ModTime: date1},
-		filename2: {ModTime: date2},
 	}
 	checksums := map[string]string{}
 	actions := DetermineActions(instructions, manifest, infos, checksums)
 	require.Empty(t, actions.ToDownload)
 	require.Empty(t, actions.ToUpdate)
-	require.EqualValues(t, actions.ToDelete, []string{filename1, filename2})
+	// Only file 1, file 2 doesn't exist on the filesystem and thus shouldn't be deleted.
+	require.EqualValues(t, actions.ToDelete, []string{filename1})
 }
 
 func TestDetermineActionsFileNotExists(t *testing.T) {
@@ -206,30 +210,6 @@ func TestDetermineActionsFileNotExists(t *testing.T) {
 			Checksum:     "def",
 		},
 	}, actions.ToUpdate)
-	require.Empty(t, actions.ToDelete)
-}
-
-func TestDetermineActionsUpToDateFromManifest(t *testing.T) {
-	instructions := []Instruction{
-		{
-			Path:            filename1,
-			OldHash:         "abc",
-			NewHash:         someStr("def"),
-			CompressedHash:  "ghi",
-			DeltaHash:       nil,
-			FullReplaceSize: 12,
-			DeltaSize:       0,
-		},
-	}
-	manifest := NewManifest("foo")
-	manifest.Add(filename1, date1, "def")
-	infos := map[string]BasicFileInfo{
-		filename1: {ModTime: date1},
-	}
-	checksums := map[string]string{}
-	actions := DetermineActions(instructions, manifest, infos, checksums)
-	require.Empty(t, actions.ToDownload)
-	require.Empty(t, actions.ToUpdate)
 	require.Empty(t, actions.ToDelete)
 }
 

@@ -63,13 +63,15 @@ type DeterminedActions struct {
 }
 
 // DetermineFilesToVerify given the raw instructions, a manifest (empty if it doesn't exist yet) and
-// metadata of existing files returns a list of files that should be measured (checksum taken).
+// metadata of existing files returns a list of files that should be measured (checksum taken)
+// and hashes of existing files that match the manifest.
 func DetermineFilesToMeasure(
 	instructions []Instruction,
 	manifest *Manifest,
 	existingFiles map[string]BasicFileInfo,
-) []string {
+) ([]string, map[string]string) {
 	toVerify := make([]string, 0)
+	checksums := make(map[string]string)
 	// A file should be measured if it is needed but can't be checked in the manifest.
 	for _, instr := range instructions {
 		if instr.NewHash == nil {
@@ -77,16 +79,21 @@ func DetermineFilesToMeasure(
 			continue
 		}
 		fileInfo, found := existingFiles[instr.Path]
-		if found && !manifest.Check(instr.Path, fileInfo.ModTime, *instr.NewHash) {
+		if !found {
+			continue // Can't measure something that doesn't exist.
+		}
+		if cs, found := manifest.Get(instr.Path, fileInfo.ModTime); found {
+			checksums[instr.Path] = cs
+		} else {
 			toVerify = append(toVerify, instr.Path)
 		}
 	}
-	return toVerify
+	return toVerify, checksums
 }
 
 // DetermineActions determines what should be downloaded and what should be patched/deleted.
-// It receives the same data as DetermineFilesToMeasure and additionally the result of file
-// measurement.
+// It receives the same data as DetermineFilesToMeasure and additionally the combined results
+// of result of file measurement and looking up files in the manifest.
 func DetermineActions(
 	instructions []Instruction,
 	manifest *Manifest,
@@ -98,11 +105,13 @@ func DetermineActions(
 	toDelete := make([]string, 0)
 
 	for instrIdx, instr := range instructions {
+		_, found := existingFiles[instr.Path]
 		if instr.NewHash == nil {
-			toDelete = append(toDelete, instr.Path)
+			if found {
+				toDelete = append(toDelete, instr.Path)
+			}
 			continue
 		}
-		fileInfo, found := existingFiles[instr.Path]
 		// Note: path, not filepath, so the slashes don't get replaced by backslashes.
 		fullPatchRemotePath := path.Join("full", *instr.NewHash)
 		fullPatchLocalPath := path.Join("patch", *instr.NewHash)
@@ -112,24 +121,9 @@ func DetermineActions(
 		// complications. The index refers to the index in the instructions.json file.
 		tempPath := path.Join("patch", "apply", fmt.Sprintf("%05d_%s", instrIdx, *instr.NewHash))
 
-		if !found {
-			toDownloadMap[instr.CompressedHash] = DownloadInstr{
-				RemotePath: fullPatchRemotePath,
-				LocalPath:  fullPatchLocalPath,
-				Checksum:   instr.CompressedHash,
-				Size:       instr.FullReplaceSize,
-			}
-			toUpdateMap[instr.Path] = UpdateInstr{
-				FilePath:     instr.Path,
-				PatchPath:    fullPatchLocalPath,
-				TempFilename: tempPath,
-				IsDelta:      false,
-				Checksum:     *instr.NewHash,
-			}
-		} else if manifest.Check(instr.Path, fileInfo.ModTime, *instr.NewHash) ||
-			strings.EqualFold(fileChecksums[instr.Path], *instr.NewHash) {
+		if found && HashEqual(fileChecksums[instr.Path], *instr.NewHash) {
 			continue // Already up to date.
-		} else if instr.DeltaHash != nil && strings.EqualFold(fileChecksums[instr.Path], instr.OldHash) {
+		} else if found && instr.DeltaHash != nil && HashEqual(fileChecksums[instr.Path], instr.OldHash) {
 			// Can use (hopefully much smaller) delta file to upgrade.
 			deltaFilename := fmt.Sprintf("%s_from_%s", *instr.NewHash, instr.OldHash)
 			deltaPatchRemotePath := path.Join("delta", deltaFilename)
@@ -148,7 +142,7 @@ func DetermineActions(
 				Checksum:     *instr.NewHash,
 			}
 		} else {
-			// File doesn't match checksum.
+			// File doesn't match checksum or doesn't exist yet.
 			toDownloadMap[instr.CompressedHash] = DownloadInstr{
 				RemotePath: fullPatchRemotePath,
 				LocalPath:  fullPatchLocalPath,

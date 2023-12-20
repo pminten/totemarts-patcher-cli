@@ -8,7 +8,6 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"strings"
 	"time"
 )
 
@@ -94,5 +93,14 @@ func (m *Manifest) Check(filename string, lastChange time.Time, checksum string)
 	if !found {
 		return false
 	}
-	return entry.LastChange.Equal(lastChange) && strings.EqualFold(entry.LastChecksum, checksum)
+	return entry.LastChange.Equal(lastChange) && HashEqual(entry.LastChecksum, checksum)
+}
+
+// Get returns the checksum of a file if one exists with the given name and last change time.
+func (m *Manifest) Get(filename string, lastChange time.Time) (string, bool) {
+	entry, found := m.Entries[path.Clean(filename)]
+	if !found || !entry.LastChange.Equal(lastChange) {
+		return "", false
+	}
+	return entry.LastChecksum, true
 }

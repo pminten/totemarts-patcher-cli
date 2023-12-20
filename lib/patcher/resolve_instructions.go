@@ -45,7 +45,7 @@ func ResolveInstructions(productsUrl *url.URL, product string) (*ResolvedInstruc
 
 	var releaseUrl *url.URL
 	for _, game := range products.Games {
-		if strings.EqualFold(game.Tag, product) {
+		if HashEqual(game.Tag, product) {
 			releaseUrl, err = url.Parse(game.ReleaseUrl)
 			if err != nil {
 				return nil, fmt.Errorf("can't convert %q in '%s' to URL: %w", game.ReleaseUrl, productsUrl, err)
@@ -79,7 +79,7 @@ func ResolveInstructions(productsUrl *url.URL, product string) (*ResolvedInstruc
 	}
 
 	checksum := HashBytes(instructionsData)
-	if !strings.EqualFold(release.Game.InstructionsHash, checksum) {
+	if !HashEqual(release.Game.InstructionsHash, checksum) {
 		return nil, fmt.Errorf("'%s' hash mismatch, expected %s got %s", instructionsUrl,
 			strings.ToUpper(release.Game.InstructionsHash), strings.ToUpper(checksum))
 	}

@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"io"
+	"strings"
 )
 
 // HashBytes generates a SHA256 hash of a byte slice.
@@ -35,4 +36,9 @@ func HashReader(ctx context.Context, s io.Reader) (string, error) {
 		}
 	}
 	return "", ctx.Err()
+}
+
+// HashEqual compares two hashes for equality.
+func HashEqual(hash1 string, hash2 string) bool {
+	return strings.EqualFold(hash1, hash2)
 }

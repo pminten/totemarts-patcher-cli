@@ -80,8 +80,9 @@ func runVerifyPhase(
 		return nil, err // ScanFiles adds enough context, no need for fmt.Errorf
 	}
 
-	toMeasure := DetermineFilesToMeasure(instructions, manifest, existingFiles)
-	log.Printf("Computing checksums of %d files.", len(toMeasure))
+	toMeasure, manifestChecksums := DetermineFilesToMeasure(instructions, manifest, existingFiles)
+	log.Printf("Computing checksums of %d files, %d checksums already known from manifest.",
+		len(toMeasure), len(manifestChecksums))
 
 	progress.PhaseStarted(PhaseVerify, len(toMeasure))
 	measuredFiles, err := DoInParallelWithResult[string, measuredFile](
@@ -114,6 +115,10 @@ func runVerifyPhase(
 		return nil, err
 	}
 	checksums := make(map[string]string, len(toMeasure))
+	// Checksums we know from the manifest count as well.
+	for k, v := range manifestChecksums {
+		checksums[k] = v
+	}
 	for _, mf := range measuredFiles {
 		checksums[mf.filename] = mf.checksum
 		manifest.Add(mf.filename, mf.modTime, mf.checksum)

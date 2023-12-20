@@ -93,7 +93,7 @@ func (x XDelta) ApplyPatch(
 	}
 
 	checksum := hex.EncodeToString(hash.Sum(nil))
-	if !strings.EqualFold(checksum, expectedChecksum) {
+	if !HashEqual(checksum, expectedChecksum) {
 		return fmt.Errorf("%s failed: expected it to produce file with checksum %s but got %s",
 			what, strings.ToUpper(expectedChecksum), strings.ToUpper(checksum))
 	}
