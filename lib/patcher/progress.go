@@ -26,10 +26,10 @@ type ProgressTracker struct {
 // Beware that this gets directly serialized for JSON progress output,
 type Progress struct {
 	// Running average of download speed in bytes per second.
-	DownloadSpeed int64 `json:"download_speed"`
+	DownloadSpeed int64 `json:"downloadSpeed"`
 
 	// Total bytes downloaded.
-	DownloadTotalBytes int64 `json:"download_total_bytes"`
+	DownloadTotalBytes int64 `json:"downloadTotalBytes"`
 
 	// Progress in the verify phase.
 	Verify ProgressPhase `json:"verify"`
