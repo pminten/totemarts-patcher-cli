@@ -203,6 +203,7 @@ func TestDetermineActionsFileNotExists(t *testing.T) {
 			PatchPath:    "patch/def",
 			TempFilename: "patch/apply/00000_def",
 			IsDelta:      false,
+			Checksum:     "def",
 		},
 	}, actions.ToUpdate)
 	require.Empty(t, actions.ToDelete)
@@ -307,12 +308,14 @@ func TestDetermineActionsDownloadFullPatchForMismatch(t *testing.T) {
 			PatchPath:    "patch/def",
 			TempFilename: "patch/apply/00000_def",
 			IsDelta:      false,
+			Checksum:     "def",
 		},
 		{
 			FilePath:     filename2,
 			PatchPath:    "patch/wvu",
 			TempFilename: "patch/apply/00001_wvu",
 			IsDelta:      false,
+			Checksum:     "wvu",
 		},
 	}, actions.ToUpdate)
 	require.Empty(t, actions.ToDelete)
@@ -352,6 +355,7 @@ func TestDetermineActionsDownloadDeltaPatch(t *testing.T) {
 			PatchPath:    "patch/def_from_abc",
 			TempFilename: "patch/apply/00000_def",
 			IsDelta:      true,
+			Checksum:     "def",
 		},
 	}, actions.ToUpdate)
 	require.Empty(t, actions.ToDelete)
