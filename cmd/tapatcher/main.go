@@ -21,7 +21,7 @@ type CommonUpdateOpts struct {
 	VerifyWorkers   int    `name:"verify-workers" help:"Number of current file verifications."`
 	DownloadWorkers int    `name:"download-workers" help:"Number of current patch downloads."`
 	ApplyWorkers    int    `name:"apply-workers" help:"Number of current patching processes."`
-	XDeltaPath      string `name:"xdelta" default:"xdelta3" help:"Path to xdelta3 binary. If no directory name will also look for this in PATH."`
+	XDeltaPath      string `name:"xdelta" short:"X" default:"xdelta3" help:"Path to xdelta3 binary. If no directory name will also look for this in PATH."`
 
 	DownloadMaxAttempts     int           `name:"download-max-attempts" default:"5" help:"How many times to try to download a file."`
 	DownloadBaseDelay       time.Duration `name:"download-base-delay" default:"1s" help:"How many seconds to wait between download retries at first."`
@@ -35,7 +35,7 @@ type CommonUpdateOpts struct {
 
 	Verbose       bool   `name:"verbose" short:"v" help:"Use verbose logging."`
 	OmitTimestamp bool   `name:"omit-timestamp" help:"Disable timestamps in logs."`
-	LogFile       string `name:"log-file" type:"path" help:"Where to store logs. Particularly useful with fancy progress mode as that hides logs."`
+	LogFile       string `name:"log-file" short:"L" type:"path" help:"Where to store logs. Particularly useful with fancy progress mode as that hides logs, use '-' for stderr."`
 }
 
 var CLI struct {
@@ -163,7 +163,8 @@ func setupLogging(commonOpts *CommonUpdateOpts) {
 	if commonOpts.OmitTimestamp {
 		log.SetFlags(0)
 	}
-	if commonOpts.LogFile != "" {
+	if commonOpts.LogFile != "" && commonOpts.LogFile != "-" {
+		// - is stderr, which is the default.
 		logFile, err := os.Create(commonOpts.LogFile)
 		if err != nil {
 			panic(fmt.Sprintf("Couldn't open log file '%s': %v", commonOpts.LogFile, err))
