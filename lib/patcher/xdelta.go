@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -21,16 +20,15 @@ type XDelta struct {
 
 // Create an XDelta instance.
 //
-// If the binPath is just a basename without directory will look in PATH and also in the current directory.
+// If the binPath is just a basename without directory it will be looked up in PATH.
+// To use binary in the current directory use something like './xdelta3'.
 func NewXDelta(binPath string) (*XDelta, error) {
 	if dir, _ := filepath.Split(binPath); dir == "" {
 		realPath, err := exec.LookPath(binPath)
-		if err != nil && !errors.Is(err, exec.ErrDot) {
+		if err != nil {
 			return nil, fmt.Errorf("failed to find '%s' in PATH: %w", binPath, err)
 		}
-		return &XDelta{
-			binPath: realPath,
-		}, nil
+		return &XDelta{binPath: realPath}, nil
 	}
 	if _, err := os.Stat(binPath); err != nil {
 		return nil, fmt.Errorf("failed to find '%s': %w", binPath, err)

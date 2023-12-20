@@ -21,7 +21,7 @@ type CommonUpdateOpts struct {
 	VerifyWorkers   int    `name:"verify-workers" help:"Number of current file verifications."`
 	DownloadWorkers int    `name:"download-workers" help:"Number of current patch downloads."`
 	ApplyWorkers    int    `name:"apply-workers" help:"Number of current patching processes."`
-	XDeltaPath      string `name:"xdelta" default:"xdelta3" help:"Path to xdelta3 binary. If no directory name will also look for this in PATH and the current directory."`
+	XDeltaPath      string `name:"xdelta" default:"xdelta3" help:"Path to xdelta3 binary. If no directory name will also look for this in PATH."`
 
 	DownloadMaxAttempts     int           `name:"download-max-attempts" default:"5" help:"How many times to try to download a file."`
 	DownloadBaseDelay       time.Duration `name:"download-base-delay" default:"1s" help:"How many seconds to wait between download retries at first."`
@@ -52,7 +52,7 @@ var CLI struct {
 		InstallDir string `arg:"" name:"install-dir" help:"Directory where the game should be."`
 		BaseUrl    string `arg:"" name:"base-url" help:"URL of \"directory\" containing the instructions.json file."`
 
-		Instructions string `name:"instructions" short:"I" type:"existingfile" help:"Path of instructions.json file, can be used to skip the download of the instru."`
+		Instructions string `name:"instructions" short:"I" default:"-" type:"existingfile" help:"Path of instructions.json file, use '-' for reading from stdin."`
 
 		CommonUpdateOpts
 	} `cmd:"" help:"Install or update a game using an already downloaded instructions.json file."`
