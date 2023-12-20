@@ -23,7 +23,7 @@ func DoInParallelWithResult[TIn any, TOut any](
 ) ([]TOut, error) {
 	// See https://pkg.go.dev/golang.org/x/sync/errgroup#example-Group-Parallel
 	g, ctx := errgroup.WithContext(ctx)
-	g.SetLimit(1)
+	g.SetLimit(numWorkers)
 	output := make([]TOut, len(input))
 	for i, val := range input {
 		i, val := i, val // Prevent loop variable closure problem

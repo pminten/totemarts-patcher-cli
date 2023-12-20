@@ -18,9 +18,9 @@ import (
 )
 
 type CommonUpdateOpts struct {
-	VerifyWorkers   int    `name:"verify-workers" help:"Number of current file verifications."`
-	DownloadWorkers int    `name:"download-workers" help:"Number of current patch downloads."`
-	ApplyWorkers    int    `name:"apply-workers" help:"Number of current patching processes."`
+	VerifyWorkers   int    `name:"verify-workers" default:"4" help:"Number of current file verifications."`
+	DownloadWorkers int    `name:"download-workers" default:"4" help:"Number of current patch downloads."`
+	ApplyWorkers    int    `name:"apply-workers" default:"4" help:"Number of current patching processes."`
 	XDeltaPath      string `name:"xdelta" short:"X" default:"xdelta3" help:"Path to xdelta3 binary. If no directory name will also look for this in PATH."`
 
 	DownloadMaxAttempts     int           `name:"download-max-attempts" default:"5" help:"How many times to try to download a file."`
