@@ -30,7 +30,7 @@ func TestDecodeInstructionsRealistic(t *testing.T) {
 		Path:            filepath.Join("Binaries", "InstallData", "dotNetFx40_Full_setup.exe"),
 		OldHash:         "FA1AFFF978325F8818CE3A559D67A58297D9154674DE7FD8EB03656D93104425",
 		NewHash:         someStr("FA1AFFF978325F8818CE3A559D67A58297D9154674DE7FD8EB03656D93104425"),
-		CompressedHash:  "1854E191B7DB2537CF1F27DBC512D0FED8C661329EC6BC8A0290BFB125CC12C0",
+		CompressedHash:  someStr("1854E191B7DB2537CF1F27DBC512D0FED8C661329EC6BC8A0290BFB125CC12C0"),
 		DeltaHash:       nil,
 		FullReplaceSize: 794539,
 		DeltaSize:       0,

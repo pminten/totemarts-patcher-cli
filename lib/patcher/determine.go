@@ -106,12 +106,15 @@ func DetermineActions(
 
 	for instrIdx, instr := range instructions {
 		_, found := existingFiles[instr.Path]
-		if instr.NewHash == nil {
+		// If NewHash is nil CompressedHash should be nil as well and vice versa.
+		// The extra check for CompressedHash is mainly here to guard against corrupted files causing panics.
+		if instr.NewHash == nil || instr.CompressedHash == nil {
 			if found {
 				toDelete = append(toDelete, instr.Path)
 			}
 			continue
 		}
+
 		// Note: path, not filepath, so the slashes don't get replaced by backslashes.
 		fullPatchRemotePath := path.Join("full", *instr.NewHash)
 		fullPatchLocalPath := path.Join("patch", *instr.NewHash)
@@ -143,10 +146,10 @@ func DetermineActions(
 			}
 		} else {
 			// File doesn't match checksum or doesn't exist yet.
-			toDownloadMap[instr.CompressedHash] = DownloadInstr{
+			toDownloadMap[*instr.CompressedHash] = DownloadInstr{
 				RemotePath: fullPatchRemotePath,
 				LocalPath:  fullPatchLocalPath,
-				Checksum:   instr.CompressedHash,
+				Checksum:   *instr.CompressedHash,
 				Size:       instr.FullReplaceSize,
 			}
 			toUpdateMap[instr.Path] = UpdateInstr{

@@ -15,8 +15,8 @@ type rawInstruction struct {
 	OldHash string `json:"OldHash"`
 	// The hash the file should have after patching. If nil the file should be deleted.
 	NewHash *string `json:"NewHash"`
-	// The hash of the full (not delta) patch file.
-	CompressedHash string `json:"CompressedHash"`
+	// The hash of the full (not delta) patch file. Can be nil if the file should be deleted.
+	CompressedHash *string `json:"CompressedHash"`
 	// If a delta patch exists the hash of the delta patch file.
 	DeltaHash *string `json:"DeltaHash"`
 	// Whether a delta patch exists.
@@ -38,7 +38,7 @@ type Instruction struct {
 	// The hash the file should have after patching. If nil the file should be deleted.
 	NewHash *string
 	// The hash of the full (not delta) patch file.
-	CompressedHash string
+	CompressedHash *string
 	// If a delta patch exists the hash of the delta patch file.
 	DeltaHash *string
 	// Size in bytes of the full patch file.
