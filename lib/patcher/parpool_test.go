@@ -52,14 +52,15 @@ func TestParpoolCancelled(t *testing.T) {
 
 func TestParpoolNoResult(t *testing.T) {
 	m := sync.Mutex{}
-	res := ""
-	execute := func(ctx context.Context, a int64) error {
+	res := 0
+	execute := func(ctx context.Context, a int) error {
 		m.Lock()
 		defer m.Unlock()
-		res += strconv.FormatInt(a, 10)
+		// Because + is commutative and associative it's safe to use with the indeterminate order here.
+		res += a
 		return nil
 	}
-	err := DoInParallel[int64](context.Background(), execute, []int64{1, 2, 3, 4, 5}, 2)
+	err := DoInParallel[int](context.Background(), execute, []int{1, 2, 3, 4, 5}, 2)
 	require.NoError(t, err)
-	require.Equal(t, "12345", res)
+	require.Equal(t, 15, res)
 }
