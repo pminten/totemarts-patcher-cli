@@ -40,9 +40,8 @@ result is that the verify phase is almost instant now instead of taking a lot of
 20 or so GB on every verify even if nothing changed.
 
 The download phase is slightly intelligent as well. If a patch file already exists from a previous failed
-invocation (those files only get deleted upon successful completion) it's measured and if the checksum is
-what's expected the download of that patch is skipped. This is not perfect, a file that was 99% downloaded
-would still be redownloaded completely instead of only the remainder, but it should help.
+invocation (those files only get deleted upon successful completion) the downloader attempts to add the missing
+bytes instead of fully redownloading it.
 
 ## Progress modes
 

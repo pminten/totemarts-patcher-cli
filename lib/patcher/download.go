@@ -76,9 +76,8 @@ type DownloadStats struct {
 // The main difference with a downloadObserver is that the latter is not protected by
 // a mutex (to avoid doing hash calculations under mutex).
 type downloadRecord struct {
-	d             *Downloader
-	downloadUrl   *url.URL
-	bytesReceived int64
+	d           *Downloader
+	downloadUrl *url.URL
 
 	// Used in some error detection code.
 	downloadIdx int64
@@ -98,6 +97,9 @@ type downloadObserver struct {
 
 	// How many seconds have passed without progress being made.
 	secondsWithoutData int
+
+	// If true the observer is being used to catch up to the data of an existing file.
+	catchUpMode bool
 }
 
 // NewDownloader creates a new downloader. Pass configuration and a function that will
@@ -159,30 +161,74 @@ func (d *Downloader) DownloadFile(
 	config := d.config // It's a struct of value types, so this is a copy.
 	d.mu.Unlock()      // Not with a defer but just getting and incrementing vars can't panic.
 
-	// First check if the output file already exists and has the right checksum,
-	// if so it's a leftover from the previous run that we can reuse.
-	// This simple approach does have the limitation that a partially downloaded file
-	// is ignored, resulting in a full download again, but it's pretty simple and should
-	// avoid most downloads after an aborted run.
-	existingFile, err := os.Open(filename)
+	observer, err := d.register(downloadUrl, filename, downloadIdx)
+	if err != nil {
+		return err
+	}
 
-	// This is an optimistic check, any error just means we can't shortcut.
-	// No real clean way to write this, nested if might be the least ugly.
-	if err == nil {
-		defer existingFile.Close()
-		// Checking for expected size avoids reading the whole file if there's no way it can match.
-		if fileInfo, err := existingFile.Stat(); err == nil && fileInfo.Size() == expectedSize {
-			if cs, err := HashReader(ctx, existingFile); err == nil && HashEqual(cs, expectedChecksum) {
-				log.Printf("Patch file '%s' is already present, skipping download.", filename)
-				return nil
+	// If the output file already exists try to reuse it, it may be an incomplete download.
+	// O_RDWD: Both read and write.
+	// O_CREATE: If it doesn't exist yet create it.
+	// No O_APPEND: it would interfere with partially reading the file (which is necessary for hashing).
+	file, err := os.OpenFile(filename, os.O_RDWR|os.O_CREATE, 0755)
+	if err != nil {
+		return fmt.Errorf("failed to open '%s' for downloading '%s' into: %w", filename, downloadUrl, err)
+	}
+	defer file.Close()
+
+	// Read all the bytes from the file. As a side effect this sets the file position at the end
+	// so writes go to the correct place.
+	offset, err := io.Copy(observer, file)
+	if err != nil {
+		return fmt.Errorf("failed to read current data from '%s': %w", filename, err)
+	}
+	if offset == expectedSize {
+		actualChecksum := observer.getChecksum()
+		if HashEqual(expectedChecksum, actualChecksum) {
+			log.Printf("Found previous completed download of '%s' (from '%s'), skipping download.",
+				filename, downloadUrl)
+			return nil
+		} else {
+			log.Printf(
+				`Previous completed download of '%s' (from '%s') has invalid checksum (expected %s, got %s), `+
+					`redownloading.`,
+				filename, downloadUrl, expectedChecksum, actualChecksum)
+			observer.resetChecksum()
+			if err := file.Truncate(0); err != nil {
+				return fmt.Errorf("failed to truncate '%s': %w", filename, err)
 			}
 		}
+	} else if offset > expectedSize {
+		log.Printf(
+			`Previous completed download of '%s' (from '%s') has too large size (expected %d, got %d), `+
+				`redownloading.`,
+			filename, downloadUrl, expectedSize, offset)
+		observer.resetChecksum()
+		if err := file.Truncate(0); err != nil {
+			return fmt.Errorf("failed to truncate '%s': %w", filename, err)
+		}
+	} else if offset > 0 {
+		log.Printf("Found partial (%d/%d bytes) download of '%s' (from '%s'), resuming download.",
+			offset, expectedSize, filename, downloadUrl)
 	}
+
+	observer.setCatchUpMode(false)
 
 	waitTime := config.RetryBaseDelay
 	attempt := 1
 	for {
-		if err := d.doDownloadFile(ctx, downloadUrl, filename, expectedChecksum, downloadIdx); err != nil {
+		if newOffset, err := d.doDownloadFile(
+			ctx,
+			file,
+			observer,
+			downloadUrl,
+			filename,
+			expectedChecksum,
+			expectedSize,
+			offset,
+			downloadIdx,
+		); err != nil {
+			offset = newOffset
 			if attempt > config.MaxAttempts {
 				return err
 			}
@@ -210,25 +256,29 @@ func (d *Downloader) DownloadFile(
 }
 
 // doDownloadFile contains the retryable for DownloadFile. It returns the checksum of the downloaded file.
+// Returns how many bytes have been written to the file in total, even if an error is returned.
 func (d *Downloader) doDownloadFile(
 	ctx context.Context,
+	file *os.File,
+	observer *downloadObserver,
 	downloadUrl *url.URL,
 	filename string,
 	expectedChecksum string,
+	expectedSize int64,
+	offset int64, // Starting point for downloading new data.
 	downloadIdx int64,
-) error {
+) (int64, error) {
+	possComplete := ""
+	if offset > 0 {
+		possComplete = " complete"
+	}
+	if offset >= expectedSize { // Sanity check.
+		return offset, fmt.Errorf(
+			"invalid offset %d for '%s', would end up requesting more than size (%d)",
+			offset, downloadUrl, expectedSize)
+	}
+
 	requestCtx, cancelRequestCtx := context.WithCancelCause(ctx)
-
-	observer, err := d.register(downloadUrl, filename, downloadIdx)
-	if err != nil {
-		return err
-	}
-
-	file, err := os.Create(filename)
-	if err != nil {
-		return fmt.Errorf("failed to open '%s' for downloading '%s' to: %w", filename, downloadUrl, err)
-	}
-	defer file.Close()
 
 	// This is for canceling the Do part, i.e. sending the request and reading the response headers
 	// (and a small bit of the response). It is similar to http.Client.Timeout but that doesn't work well
@@ -244,7 +294,11 @@ func (d *Downloader) doDownloadFile(
 	}()
 	req, err := http.NewRequestWithContext(doCtx, http.MethodGet, downloadUrl.String(), nil)
 	if err != nil {
-		return fmt.Errorf("failed to create request to download '%s': %w", downloadUrl, err)
+		return offset, fmt.Errorf("failed to create request to download '%s': %w", downloadUrl, err)
+	}
+	if offset > 0 {
+		// Endpoint of range is inclusive.
+		req.Header.Add("Range", fmt.Sprintf("bytes=%d-%d", offset, expectedSize-1))
 	}
 
 	resp, err := http.DefaultClient.Do(req)
@@ -253,15 +307,36 @@ func (d *Downloader) doDownloadFile(
 		// have pressed interrupt or something. By detecting this and explicitly setting the error
 		// to a non-canceled error this is avoided.
 		if errors.Is(err, context.Canceled) && errors.Is(context.Cause(doCtx), errOurTimeout) {
-			err = fmt.Errorf("request timeout (%s) exceeded", d.config.DownloadRequestTimeout)
+			err = fmt.Errorf("failed to request%s download of '%s': request timeout (%s) exceeded",
+				possComplete, downloadUrl, d.config.DownloadRequestTimeout)
 		}
-		return fmt.Errorf("failed to request download of '%s': %w", downloadUrl, err)
+		return offset, fmt.Errorf("failed to request%s download of '%s': %w", possComplete, downloadUrl, err)
 	}
 	close(doDoneChan)
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("failed to download '%s' to '%s' (status %d)", downloadUrl, filename, resp.StatusCode)
+	if offset > 0 {
+		if resp.StatusCode == http.StatusOK {
+			return offset, fmt.Errorf(
+				"failed to resume download '%s' to '%s', server doesn't understand range header (status 200)",
+				downloadUrl, filename)
+		}
+		if resp.StatusCode != http.StatusPartialContent {
+			return offset, fmt.Errorf("failed to resume download '%s' (status %d)",
+				downloadUrl, resp.StatusCode)
+		}
+	} else {
+		if resp.StatusCode != http.StatusOK {
+			return offset, fmt.Errorf("failed to download '%s' (status %d)",
+				downloadUrl, resp.StatusCode)
+		}
+	}
+
+	contentType := resp.Header.Get("Content-Type")
+	if contentType != "application/octet-stream" {
+		// Hopefully this will protect against crazy MitM ISPs injecting weird errors.
+		return offset, fmt.Errorf("failed to%s download '%s': unexpected content type %q, expected %s",
+			possComplete, downloadUrl, contentType, "application/octet-stream")
 	}
 
 	watchdogCtx, cancelWatchdog := context.WithCancel(ctx)
@@ -287,23 +362,29 @@ func (d *Downloader) doDownloadFile(
 	}()
 
 	reader := io.TeeReader(resp.Body, observer)
-	_, err = io.Copy(file, reader)
+	written, err := io.Copy(file, reader)
+	offset += written
 	if err != nil {
 		if errors.Is(err, context.Canceled) && errors.Is(context.Cause(doCtx), errOurStall) {
-			err = fmt.Errorf("download stalled for at least %s", d.config.DownloadStallTimeout)
+			err = fmt.Errorf("failed to%s download '%s' to '%s': download stalled for at least %s",
+				possComplete, downloadUrl, filename, d.config.DownloadStallTimeout)
 		}
-		return fmt.Errorf("failed to download '%s' to '%s': %w", downloadUrl, filename, err)
-
+		return offset, fmt.Errorf("failed to%s download '%s' to '%s': %w", possComplete, downloadUrl, filename, err)
 	}
 
-	observer.mu.Lock()
-	defer observer.mu.Unlock()
-	actualChecksum := hex.EncodeToString(observer.hash.Sum(nil))
+	if offset < expectedSize {
+		return offset, fmt.Errorf(
+			`failed to%s download '%s' to '%s': download stopped before file was fully received `+
+				`(got %d, need %d bytes)`, possComplete, downloadUrl, filename, offset, expectedSize)
+	}
+
+	actualChecksum := observer.getChecksum()
 	if !HashEqual(expectedChecksum, actualChecksum) {
-		return fmt.Errorf("downloaded file has invalid checksum for '%s' downloaded to '%s', expected %s, got %s",
-			downloadUrl, filename, expectedChecksum, actualChecksum)
+		return offset,
+			fmt.Errorf("downloaded file has invalid checksum for '%s' downloaded to '%s', expected %s, got %s",
+				downloadUrl, filename, expectedChecksum, actualChecksum)
 	}
-	return nil
+	return offset, nil
 }
 
 func (d *Downloader) register(downloadUrl *url.URL, filename string, downloadIdx int64) (*downloadObserver, error) {
@@ -316,10 +397,9 @@ func (d *Downloader) register(downloadUrl *url.URL, filename string, downloadIdx
 		return nil, fmt.Errorf("DownloadFile called twice for '%s'", filename)
 	}
 	dip := &downloadRecord{
-		d:             d,
-		downloadUrl:   downloadUrl,
-		bytesReceived: 0,
-		downloadIdx:   downloadIdx,
+		d:           d,
+		downloadUrl: downloadUrl,
+		downloadIdx: downloadIdx,
 	}
 	d.downloads[filename] = dip
 	observer := &downloadObserver{
@@ -351,13 +431,35 @@ func (o *downloadObserver) Write(p []byte) (n int, err error) {
 	o.secondsWithoutData = 0
 	o.mu.Unlock()
 
-	o.dip.d.mu.Lock()
-	defer o.dip.d.mu.Unlock()
+	if !o.catchUpMode {
+		o.dip.d.mu.Lock()
+		defer o.dip.d.mu.Unlock()
 
-	count := int64(len(p))
-	o.dip.bytesReceived += count
-	o.dip.d.bytesDownloadedThisSecond += count
-	o.dip.d.bytesDownloadedTotal += count
+		count := int64(len(p))
+		o.dip.d.bytesDownloadedThisSecond += count
+		o.dip.d.bytesDownloadedTotal += count
+	}
 
 	return len(p), nil
+}
+
+// setCatchUpMode enables or disables catch up mode (which makes the observer only add new data to the hash).
+func (o *downloadObserver) setCatchUpMode(catchUpMode bool) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.catchUpMode = catchUpMode
+}
+
+// getChecksum returns the checksum computed so far from the observer.
+func (o *downloadObserver) getChecksum() string {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return hex.EncodeToString(o.hash.Sum(nil))
+}
+
+// resetChecksum resets the hash inside the observer.
+func (o *downloadObserver) resetChecksum() {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.hash = sha256.New()
 }
