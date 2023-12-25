@@ -26,14 +26,18 @@ func makeFancyProgressFunc(product string, installDir string, gameVersion *strin
 	var widecounters pb.ElementFunc = func(state *pb.State, args ...string) string {
 		current := state.Current()
 		total := state.Total()
-		if state.GetBool("forcezero") {
+		if state.GetBool("force_zero") {
 			// The progress bar lib doesn't understand "0 total elements, but 100% complete"
 			// (used for phase completed). The workaround is to set current and total to 1.
 			// To avoid the user noticing the counters are faked.
 			current = 0
 			total = 0
 		}
-		return fmt.Sprintf("%5d / %5d", current, total)
+		totalStr := "?"
+		if state.GetBool("total_known") {
+			totalStr = fmt.Sprintf("%d", total)
+		}
+		return fmt.Sprintf("%5d / %5s", current, totalStr)
 	}
 	pb.RegisterElement("widecounters", widecounters, false)
 
@@ -118,12 +122,13 @@ func makeFancyProgressFunc(product string, installDir string, gameVersion *strin
 			phb.SetCurrent(int64(ph.Completed))
 			phb.SetTotal(int64(ph.Needed))
 			phb.Set("duration", time.Duration(ph.Duration)*time.Second)
+			phb.Set("total_known", ph.NeededKnown)
 			if ph.Done {
 				if ph.Needed == 0 {
 					// Fake the amounts to get 100% bar.
 					phb.SetCurrent(1)
 					phb.SetTotal(1)
-					phb.Set("forcezero", true)
+					phb.Set("force_zero", true)
 				}
 				phb.Finish() // Safe to call multiple times.
 			}
@@ -148,20 +153,24 @@ func plainProgress(p patcher.Progress) {
 			return fmt.Sprintf("%d:%02d:%02d", int(d.Hours()), int(d.Minutes())%60, int(d.Seconds())%60)
 		}
 	}
-	phaseProgress := func(pp patcher.ProgressPhase) string {
+	phaseProgress := func(ph patcher.ProgressPhase) string {
 		var perc float64
-		if pp.Needed > 0 {
-			perc = float64(pp.Completed) / float64(pp.Needed) * 100
+		if ph.Needed > 0 {
+			perc = float64(ph.Completed) / float64(ph.Needed) * 100
 		} else {
 			perc = 0
 		}
-		if pp.Processing > 0 {
-			return fmt.Sprintf("%d/%d (%.1f%%, %s, %d in progress)", pp.Completed, pp.Needed, perc,
-				phaseTime(pp), pp.Processing)
-		} else if pp.Done {
-			return fmt.Sprintf("%d/%d (100%%, %s)", pp.Completed, pp.Needed, phaseTime(pp))
+		neededStr := "?"
+		if ph.NeededKnown {
+			neededStr = fmt.Sprintf("%d", ph.Needed)
+		}
+		if ph.Processing > 0 {
+			return fmt.Sprintf("%d/%s (%.1f%%, %s, %d in progress)", ph.Completed, neededStr, perc,
+				phaseTime(ph), ph.Processing)
+		} else if ph.Done {
+			return fmt.Sprintf("%d/%s (100%%, %s)", ph.Completed, neededStr, phaseTime(ph))
 		} else {
-			return fmt.Sprintf("%d/%d (%.1f%%, %s)", pp.Completed, pp.Needed, perc, phaseTime(pp))
+			return fmt.Sprintf("%d/%s (%.1f%%, %s)", ph.Completed, neededStr, perc, phaseTime(ph))
 		}
 	}
 	fmt.Printf("Verify: %s, Download: %s, Apply: %s, DL: %s/s, %s total\n",

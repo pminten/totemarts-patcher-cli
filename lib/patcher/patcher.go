@@ -62,6 +62,7 @@ func runVerifyPhase(
 	numWorkers int,
 	progress *ProgressTracker,
 ) (*DeterminedActions, error) {
+	progress.PhaseStarted(PhaseVerify)
 	log.Printf("Scanning files in installation directory '%s'.", installDir)
 
 	// Unlikely, but I've observed some funky flip flopping when I accidentally triggered this.
@@ -84,7 +85,7 @@ func runVerifyPhase(
 	log.Printf("Computing checksums of %d files, %d checksums already known from manifest.",
 		len(toMeasure), len(manifestChecksums))
 
-	progress.PhaseStarted(PhaseVerify, len(toMeasure)+len(manifestChecksums))
+	progress.PhaseSetNeeded(PhaseVerify, len(toMeasure)+len(manifestChecksums))
 	progress.PhaseItemsSkipped(PhaseVerify, len(manifestChecksums))
 	measuredFiles, err := DoInParallelWithResult[string, measuredFile](
 		ctx,
@@ -126,6 +127,9 @@ func runVerifyPhase(
 	}
 	actions := DetermineActions(instructions, manifest, existingFiles, checksums)
 	progress.PhaseDone(PhaseVerify)
+	// At this point we can report how many download and apply actions will be needed.
+	progress.PhaseSetNeeded(PhaseDownload, len(actions.ToDownload))
+	progress.PhaseSetNeeded(PhaseApply, len(actions.ToUpdate))
 	return &actions, nil
 }
 
@@ -147,7 +151,7 @@ func runDownloadPhase(
 	}, ctx)
 
 	log.Printf("Downloading %d patch files.", len(toDownload))
-	progress.PhaseStarted(PhaseDownload, len(toDownload))
+	progress.PhaseStarted(PhaseDownload)
 	err := DoInParallel(
 		ctx,
 		func(ctx context.Context, di DownloadInstr) (retErr error) {
@@ -184,7 +188,7 @@ func runPatchPhase(
 	numWorkers int,
 ) error {
 	log.Printf("Patching %d files.", len(toUpdate))
-	progress.PhaseStarted(PhaseApply, len(toUpdate))
+	progress.PhaseStarted(PhaseApply)
 	err := DoInParallel(
 		ctx,
 		func(ctx context.Context, ui UpdateInstr) (retErr error) {

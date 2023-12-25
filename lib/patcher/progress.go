@@ -51,6 +51,9 @@ type ProgressPhase struct {
 	Errors int `json:"errors"`
 	// How many items should be processed.
 	Needed int `json:"needed"`
+	// Whether the Needed value is known. If this is false the Needed value
+	// will be 0 but doesn't mean anything yet.
+	NeededKnown bool `json:"needed_known"`
 	// Whether the phase is completed.
 	// In the case of completed == 0 the phase might be not started yet
 	// or completed.
@@ -86,12 +89,20 @@ func (p *ProgressTracker) UpdateDownloadStats(stats DownloadStats) {
 	p.current.DownloadTotalBytes = stats.TotalBytes
 }
 
-// PhaseStarted sets the needed value for a phase and marks it as started.
-func (p *ProgressTracker) PhaseStarted(phase Phase, needed int) {
+// PhaseSetNeeded sets the needed value for a phase.
+func (p *ProgressTracker) PhaseSetNeeded(phase Phase, needed int) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	ph := p.current.GetPhase(phase)
 	ph.Needed = needed
+	ph.NeededKnown = true
+}
+
+// PhaseStarted marks a phase as started.
+func (p *ProgressTracker) PhaseStarted(phase Phase) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	ph := p.current.GetPhase(phase)
 	t := time.Now()
 	ph.startedAt = &t
 }
