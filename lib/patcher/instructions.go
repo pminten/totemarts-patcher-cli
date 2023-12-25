@@ -21,6 +21,8 @@ type rawInstruction struct {
 	DeltaHash *string `json:"DeltaHash"`
 	// Whether a delta patch exists.
 	HasDelta bool `json:"HasDelta"`
+	// Size of the file. May be 0 as this is a new field and instructions.json might not have it yet.
+	FileSize int64 `json:"FileSize"`
 	// Size in bytes of the full patch file.
 	FullReplaceSize int64 `json:"FullReplaceSize"`
 	// Size in bytes of the delta patch file. Zero if there is no delta patch file.
@@ -41,6 +43,8 @@ type Instruction struct {
 	CompressedHash *string
 	// If a delta patch exists the hash of the delta patch file.
 	DeltaHash *string
+	// Size of the file. May be 0 as this is a new field and instructions.json might not have it yet.
+	FileSize int64 `json:"FileSize"`
 	// Size in bytes of the full patch file.
 	FullReplaceSize int64
 	// Size in bytes of the delta patch file. Zero if there is no delta patch file.
@@ -79,6 +83,7 @@ func DecodeInstructions(jsonData []byte) ([]Instruction, error) {
 			NewHash:         ri.NewHash,
 			CompressedHash:  ri.CompressedHash,
 			DeltaHash:       ri.DeltaHash,
+			FileSize:        ri.FileSize,
 			FullReplaceSize: ri.FullReplaceSize,
 			DeltaSize:       ri.DeltaSize,
 		})

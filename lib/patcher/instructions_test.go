@@ -19,6 +19,7 @@ func TestDecodeInstructionsRealistic(t *testing.T) {
 		"DeltaHash":null,
 		"OldLastWriteTime":"2022-12-03T06:35:03.6677356Z",
 		"NewLastWriteTime":"2022-12-03T06:35:03.6677356Z",
+		"FileSize": 12345678,
 		"FullReplaceSize":794539,
 		"DeltaSize":0,
 		"HasDelta":false,
@@ -32,6 +33,7 @@ func TestDecodeInstructionsRealistic(t *testing.T) {
 		NewHash:         someStr("FA1AFFF978325F8818CE3A559D67A58297D9154674DE7FD8EB03656D93104425"),
 		CompressedHash:  someStr("1854E191B7DB2537CF1F27DBC512D0FED8C661329EC6BC8A0290BFB125CC12C0"),
 		DeltaHash:       nil,
+		FileSize:        12345678,
 		FullReplaceSize: 794539,
 		DeltaSize:       0,
 	}}

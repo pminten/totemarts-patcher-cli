@@ -195,9 +195,9 @@ func runPatchPhase(
 			defer progress.PhaseItemDone(PhaseApply, retErr)
 			if ui.IsDelta {
 				oldPath := filepath.Join(installDir, ui.FilePath)
-				return xdelta.ApplyPatch(ctx, &oldPath, patchPath, newPath, ui.Checksum)
+				return xdelta.ApplyPatch(ctx, &oldPath, patchPath, newPath, ui.Checksum, ui.Size)
 			} else {
-				return xdelta.ApplyPatch(ctx, nil, patchPath, newPath, ui.Checksum)
+				return xdelta.ApplyPatch(ctx, nil, patchPath, newPath, ui.Checksum, ui.Size)
 			}
 		},
 		toUpdate,

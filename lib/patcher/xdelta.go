@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -46,6 +47,7 @@ func (x XDelta) ApplyPatch(
 	patchPath string,
 	newPath string,
 	expectedChecksum string,
+	expectedSize int64,
 ) error {
 	// Validating the checksum here makes the xdelta code messier but saves a lot of time because
 	// we don't have to read the file later.
@@ -73,7 +75,22 @@ func (x XDelta) ApplyPatch(
 		return fmt.Errorf("%s failed (start xdelta): %w", what, err)
 	}
 
-	file, err := os.Create(newPath)
+	var file *os.File
+	if expectedSize > 0 {
+		file, err = CreateWithSizeHint(newPath, expectedSize)
+		if err != nil {
+			log.Printf(
+				"Creating '%s' for writing with preallocation for size %d failed, falling back to plain open: %s",
+				newPath, expectedSize, err)
+			// There's one weird edge case here, if the fallback implementation (OS is not Windows and not Linux)
+			// is used os.Create is already the entire fallback so it boils down to os.Create then try os.Create.
+			// Because both the Windows and Linux preallocation implementation open a file for writing it's possible
+			// for those that there are two errors from os.Create (or windows.CreateFile) as well.
+			file, err = os.Create(newPath)
+		}
+	} else {
+		file, err = os.Create(newPath)
+	}
 	if err != nil {
 		return fmt.Errorf("%s failed (create file): %w", what, err)
 	}

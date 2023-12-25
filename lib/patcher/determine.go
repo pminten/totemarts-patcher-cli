@@ -50,6 +50,9 @@ type UpdateInstr struct {
 
 	// The final hash the file should have.
 	Checksum string
+
+	// The size the file is expected to have. It may be 0 if this is unknown.
+	Size int64
 }
 
 // DeterminedActions are the result of DetermineActions.
@@ -143,6 +146,7 @@ func DetermineActions(
 				TempFilename: tempPath,
 				IsDelta:      true,
 				Checksum:     *instr.NewHash,
+				Size:         instr.FileSize,
 			}
 		} else {
 			// File doesn't match checksum or doesn't exist yet.
@@ -158,6 +162,7 @@ func DetermineActions(
 				TempFilename: tempPath,
 				IsDelta:      false,
 				Checksum:     *instr.NewHash,
+				Size:         instr.FileSize,
 			}
 		}
 	}
