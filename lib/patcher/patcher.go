@@ -61,6 +61,7 @@ func runVerifyPhase(
 	installDir string,
 	numWorkers int,
 	progress *ProgressTracker,
+	emitProgress func(),
 ) (*DeterminedActions, error) {
 	progress.PhaseStarted(PhaseVerify)
 	log.Printf("Scanning files in installation directory '%s'.", installDir)
@@ -86,6 +87,8 @@ func runVerifyPhase(
 		len(toMeasure), len(manifestChecksums))
 
 	progress.PhaseSetNeeded(PhaseVerify, len(toMeasure)+len(manifestChecksums))
+	// Force out progres at this point. It looks a lot nicer UI wise.
+	emitProgress()
 	progress.PhaseItemsSkipped(PhaseVerify, len(manifestChecksums))
 	measuredFiles, err := DoInParallelWithResult[string, measuredFile](
 		ctx,
@@ -273,6 +276,10 @@ func RunPatcher(ctx context.Context, instructions []Instruction, config PatcherC
 	progressDone := make(chan struct{})
 	defer func() { cancelCtx(); <-progressDone }()
 
+	// Sometimes it's useful to force out a progress update so the UI doesn't seem to have weird jumps.
+	emitProgresChan := make(chan struct{})
+	emitProgress := func() { emitProgresChan <- struct{}{} }
+
 	progress := NewProgress()
 	go func() {
 		ticker := time.NewTicker(config.ProgressInterval)
@@ -280,6 +287,8 @@ func RunPatcher(ctx context.Context, instructions []Instruction, config PatcherC
 		for {
 			select {
 			case <-ticker.C:
+				config.ProgressFunc(progress.Current())
+			case <-emitProgresChan:
 				config.ProgressFunc(progress.Current())
 			case <-ctx.Done():
 				// Report progress one last time, usually that's the "all completed" progress.
@@ -297,10 +306,12 @@ func RunPatcher(ctx context.Context, instructions []Instruction, config PatcherC
 		config.InstallDir,
 		config.VerifyWorkers,
 		progress,
+		emitProgress,
 	)
 	if err != nil {
 		return err
 	}
+	emitProgress()
 
 	err = runDownloadPhase(
 		ctx,
@@ -314,6 +325,7 @@ func RunPatcher(ctx context.Context, instructions []Instruction, config PatcherC
 	if err != nil {
 		return err
 	}
+	emitProgress()
 
 	err = runPatchPhase(
 		ctx,
