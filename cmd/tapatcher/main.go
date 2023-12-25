@@ -199,7 +199,7 @@ func doUpdate(
 			if err != nil {
 				log.Fatalf("Failed to serialize progress structure: %s", err)
 			}
-			println(string(data))
+			fmt.Printf("%s\n", data)
 		}
 	} else if commonOpts.ProgressMode == "fancy" {
 		var stopProgressFunc func()
