@@ -85,6 +85,9 @@ jobs:
           generate_release_notes: true
           fail_on_unmatched_files: true
           prerelease: ${{ contains(github.ref, '-beta') }}
+          # Use a temporary personal access token.
+          # TODO: Replace with a better system if the repo is moved to the main org.
+          token: ${{ secrets.TEMP_ACCESS_TOKEN }}
           files: |
             tapatcher.exe
             tapatcher
