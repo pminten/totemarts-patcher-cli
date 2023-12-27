@@ -61,7 +61,9 @@ func DecodeInstructions(jsonData []byte) ([]Instruction, error) {
 	for _, ri := range rawInstructions {
 		// This little dance normalizes paths to work on Linux as well.
 		path := filepath.Clean(strings.ReplaceAll(ri.Path, "\\", string(filepath.Separator)))
-		if filepath.IsAbs(path) {
+		// The : part is a little blunt. Problem is that without it the tests will fail on Linux
+		// as filepath there doesn't think C:/foo is a problem (it isn't, interpreted as Linux path).
+		if filepath.IsAbs(path) || strings.ContainsRune(path, ':') {
 			return nil, fmt.Errorf("instructions.json contains absolute path: %s", path)
 		}
 		// Prevent escapes via stuff like '..', assuming the directory doesn't already have weird stuff like

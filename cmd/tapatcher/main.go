@@ -17,6 +17,9 @@ import (
 	"github.com/pminten/totemarts-patcher-cli/lib/patcher"
 )
 
+// Current version number. Gets injected via Github action.
+var Version string = "<unknown version>"
+
 type CommonUpdateOpts struct {
 	VerifyWorkers   int    `name:"verify-workers" default:"4" help:"Number of concurrent file verifications."`
 	DownloadWorkers int    `name:"download-workers" default:"4" help:"Number of concurrent patch downloads."`
@@ -58,6 +61,8 @@ var CLI struct {
 	} `cmd:"" help:"Install or update a game using an already downloaded instructions.json file."`
 	About struct {
 	} `cmd:"" help:"Show license info."`
+	Version struct {
+	} `cmd:"" help:"Show version of patcher."`
 }
 
 func update() {
@@ -256,6 +261,8 @@ func main() {
 		updateFromInstructions()
 	case "about":
 		printAbout()
+	case "version":
+		printVersion()
 	default:
 		kongCtx.Fatalf("Unknown command %s", kongCtx.Command())
 	}

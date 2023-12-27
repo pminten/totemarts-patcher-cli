@@ -290,9 +290,9 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 ```
 
-## golang.org/x/sys/windows
+## golang.org/x/sys
 
-* Name: golang.org/x/sys/windows
+* Name: golang.org/x/sys
 * Version: v0.15.0
 * License: [BSD-3-Clause](https://cs.opensource.google/go/x/sys/+/v0.15.0:LICENSE)
 

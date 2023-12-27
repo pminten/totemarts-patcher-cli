@@ -1,10 +1,19 @@
 {{ range . }}
+{{- /* Without this the committed file would flipflop depending on the version built.
+       It's all the same package anyway. */ -}}
+{{ if (or (eq .Name "golang.org/x/sys/unix") (eq .Name "golang.org/x/sys/windows")) }}
+## golang.org/x/sys
+
+* Name: golang.org/x/sys
+* Version: {{ .Version }}
+* License: [{{ .LicenseName }}]({{ .LicenseURL }})
+{{ else }}
 ## {{ .Name }}
 
 * Name: {{ .Name }}
 * Version: {{ .Version }}
 * License: [{{ .LicenseName }}]({{ .LicenseURL }})
-
+{{ end }}
 ```
 {{ .LicenseText }}
 ```
