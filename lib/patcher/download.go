@@ -380,8 +380,14 @@ func (d *Downloader) doDownloadFile(
 
 	actualChecksum := observer.getChecksum()
 	if !HashEqual(expectedChecksum, actualChecksum) {
-		return offset,
-			fmt.Errorf("downloaded file has invalid checksum for '%s' downloaded to '%s', expected %s, got %s",
+		if err := file.Truncate(0); err != nil {
+			return 0, fmt.Errorf("failed to truncate '%s' (because of checksum mismatch): %w", filename, err)
+		}
+		observer.resetChecksum()
+		return 0,
+			fmt.Errorf(
+				"downloaded file has invalid checksum for '%s' downloaded to '%s', expected %s, got %s, "+
+					"redownloading on the next attempt",
 				downloadUrl, filename, expectedChecksum, actualChecksum)
 	}
 	return offset, nil

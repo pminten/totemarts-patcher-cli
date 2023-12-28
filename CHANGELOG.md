@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- Truncate downloaded file if checksums mismatch. This allows graceful recovery on a retry
+  instead of having to restart the entire process.
+
 ## [0.0.1] - 2023-12-27
 
 ### Added
